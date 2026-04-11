@@ -43,13 +43,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
-  log('info', 'Cron triggered — running consensus detection');
+  // Optional ?window=Nh override — cron-secret-gated, for backfill testing only
+  const windowParam = req.nextUrl.searchParams.get('window');
+  const timeWindowHours = windowParam ? Math.min(parseInt(windowParam, 10), 168) : undefined;
+
+  log('info', `Cron triggered — window=${timeWindowHours ?? 4}h`);
 
   // ── 2. Run consensus engine
   let alerts;
   let summary;
   try {
-    ({ alerts, summary } = await detectConsensus());
+    ({ alerts, summary } = await detectConsensus(
+      timeWindowHours ? { timeWindowHours } : {},
+    ));
   } catch (err) {
     log('error', 'Consensus engine failed', err);
     return NextResponse.json(
