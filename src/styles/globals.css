@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* ============================================================
+   SONAR Design System
+   ============================================================ */
+
+:root {
+  /* Background layers */
+  --bg-primary:    #0a0a0f;
+  --bg-surface:    #12121a;
+  --bg-border:     #1e1e2e;
+
+  /* Accent colors */
+  --accent-green:  #00e599;
+  --accent-red:    #ff4757;
+  --accent-blue:   #00b8ff;
+  --accent-yellow: #ffd60a;
+
+  /* Text */
+  --text-primary:  #e8e8ef;
+  --text-muted:    #6b6b80;
+
+  /* Fonts */
+  --font-heading: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
+  --font-body:    var(--font-inter), 'Inter', sans-serif;
+  --font-mono:    var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+}
+
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+/* Base reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+code, pre, kbd, samp {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
