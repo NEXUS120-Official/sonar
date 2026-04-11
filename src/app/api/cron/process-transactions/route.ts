@@ -11,6 +11,8 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { detectConsensus } from '@/lib/consensus/engine';
+import { formatConsensusAlert } from '@/lib/telegram/formatter';
+import { sendToChannel, isTelegramConfigured } from '@/lib/telegram/bot';
 
 // ── Auth helper ───────────────────────────────────────────────
 
@@ -80,7 +82,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       signature:     b.signature,
     }));
 
-    const { error: insertError } = await db.from('alerts').insert({
+    const { data: inserted, error: insertError } = await db.from('alerts').insert({
       type:                   'consensus',
       consensus_level:         alert.consensusLevel,
       consensus_label:         alert.consensusLabel,
@@ -98,15 +100,43 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       jupiter_swap_url:        alert.jupiterSwapUrl,
       birdeye_url:             alert.birdeyeUrl,
       sent_telegram:           false,
-    });
+    }).select('id').single();
 
     if (insertError) {
       log('error', `Failed to insert alert for ${alert.tokenAddress.slice(0, 8)}`, insertError.message);
       dbErrors++;
-    } else {
-      const emoji = alert.consensusLevel >= 4 ? '💎' : alert.consensusLevel >= 3 ? '🔥' : '⚡';
-      log('info', `Alert saved — ${emoji} ${alert.tokenSymbol ?? alert.tokenAddress.slice(0, 8)} (${alert.consensusLabel})`);
-      dbInserted++;
+      continue;
+    }
+
+    const emoji = alert.consensusLevel >= 4 ? '💎' : alert.consensusLevel >= 3 ? '🔥' : '⚡';
+    log('info', `Alert saved — ${emoji} ${alert.tokenSymbol ?? alert.tokenAddress.slice(0, 8)} (${alert.consensusLabel})`);
+    dbInserted++;
+
+    // ── Send to Telegram channel
+    if (isTelegramConfigured()) {
+      let telegramOk = false;
+      try {
+        const message = formatConsensusAlert(alert);
+        telegramOk = await sendToChannel(message);
+      } catch (tgErr) {
+        log('warn', `Telegram format/send threw for ${alert.tokenAddress.slice(0, 8)}`, tgErr);
+      }
+
+      if (telegramOk) {
+        // Mark as sent in DB by ID — log but don't break if update fails
+        const { error: updateErr } = await db
+          .from('alerts')
+          .update({ sent_telegram: true, sent_at: new Date().toISOString() })
+          .eq('id', inserted.id);
+
+        if (updateErr) {
+          log('warn', `sent_telegram update failed for ${alert.tokenAddress.slice(0, 8)}`, updateErr.message);
+        } else {
+          log('info', `Telegram sent — ${emoji} ${alert.tokenSymbol ?? alert.tokenAddress.slice(0, 8)}`);
+        }
+      } else {
+        log('warn', `Telegram delivery failed for ${alert.tokenAddress.slice(0, 8)}`);
+      }
     }
   }
 
