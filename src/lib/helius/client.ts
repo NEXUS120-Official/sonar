@@ -102,7 +102,9 @@ export interface HeliusWebhook extends HeliusWebhookConfig {
 // ── Internal helpers ─────────────────────────────────────────
 
 function apiUrl(path: string, apiKey: string): string {
-  return `${HELIUS_API_REST}${path}?api-key=${apiKey}`;
+  // Use '&' if the path already carries query params, '?' otherwise.
+  const sep = path.includes('?') ? '&' : '?';
+  return `${HELIUS_API_REST}${path}${sep}api-key=${apiKey}`;
 }
 
 function getApiKey(): string {
