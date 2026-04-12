@@ -52,39 +52,46 @@ export async function fetchBirdeyeTopTraders(
     return [];
   }
 
-  const params = new URLSearchParams({
-    type:      '1W',          // valid values: today | 1W (1M not available on free tier)
-    sort_by:   'PnL',
-    sort_type: 'desc',
-    offset:    '0',
-    limit:     String(Math.min(limit, 50)),
-  });
+  // Try 1W first (more data), fall back to today if rate-limited
+  const types = ['1W', 'today'];
 
-  const url = `${BIRDEYE_BASE}/trader/gainers-losers?${params.toString()}`;
-
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'X-API-KEY': apiKey,
-        'x-chain':   'solana',
-      },
+  for (const type of types) {
+    const params = new URLSearchParams({
+      type,
+      sort_by:   'PnL',
+      sort_type: 'desc',
+      offset:    '0',
+      limit:     String(Math.min(limit, 50)),
     });
 
-    if (!res.ok) {
-      console.warn(`[discovery/birdeye] HTTP ${res.status} — ${await res.text().catch(() => '')}`);
-      return [];
+    try {
+      const res = await fetch(`${BIRDEYE_BASE}/trader/gainers-losers?${params.toString()}`, {
+        headers: { 'X-API-KEY': apiKey, 'x-chain': 'solana' },
+      });
+
+      if (res.status === 429) {
+        console.warn(`[discovery/birdeye] 429 on type=${type} — trying fallback`);
+        continue;
+      }
+
+      if (!res.ok) {
+        console.warn(`[discovery/birdeye] HTTP ${res.status} on type=${type}`);
+        continue;
+      }
+
+      const json = await res.json() as BirdeyeLeaderboardResponse;
+      const items = json.data?.items ?? [];
+      console.log(`[discovery/birdeye] type=${type} returned ${items.length} traders`);
+
+      return items
+        .filter((t) => t.address && t.address.length >= 32)
+        .map((t) => mapTrader(t));
+    } catch (err) {
+      console.error(`[discovery/birdeye] Fetch error type=${type}:`, err);
     }
-
-    const json = await res.json() as BirdeyeLeaderboardResponse;
-    const items = json.data?.items ?? [];
-
-    return items
-      .filter((t) => t.address && t.address.length >= 32)
-      .map((t) => mapTrader(t));
-  } catch (err) {
-    console.error('[discovery/birdeye] Fetch error:', err);
-    return [];
   }
+
+  return [];
 }
 
 // ── Mapper ────────────────────────────────────────────────────

@@ -88,18 +88,22 @@ export function scoreCandidate(metrics: CandidateMetrics): ScoringResult {
   const gateFailures: string[] = [];
 
   // ── Non-negotiable gate checks ───────────────────────────────
-  const tradeCount = metrics.tradeCount30d ?? 0;
-  if (tradeCount < MIN_TRADES_30D) {
+  // NULL means "data unavailable from source" — not a confirmed failure.
+  // Hard rejects only when we KNOW the value and it fails.
+  // Unknowns are penalised in score and routed to manual_review, not auto_reject.
+
+  const tradeCount = metrics.tradeCount30d;
+  if (tradeCount !== null && tradeCount !== undefined && tradeCount < MIN_TRADES_30D) {
     gateFailures.push(`trade_count ${tradeCount} < ${MIN_TRADES_30D}`);
   }
 
-  const winRate = metrics.winRate30d ?? 0;
-  if (winRate <= MIN_WIN_RATE) {
+  const winRate = metrics.winRate30d;
+  if (winRate !== null && winRate !== undefined && winRate <= MIN_WIN_RATE) {
     gateFailures.push(`win_rate ${winRate.toFixed(1)}% ≤ ${MIN_WIN_RATE}%`);
   }
 
-  const diversity = metrics.tokenDiversity30d ?? 0;
-  if (diversity < MIN_TOKEN_DIVERSITY) {
+  const diversity = metrics.tokenDiversity30d;
+  if (diversity !== null && diversity !== undefined && diversity < MIN_TOKEN_DIVERSITY) {
     gateFailures.push(`token_diversity ${diversity} < ${MIN_TOKEN_DIVERSITY}`);
   }
 
@@ -109,19 +113,18 @@ export function scoreCandidate(metrics: CandidateMetrics): ScoringResult {
       const days = Math.floor(msSince / (24 * 60 * 60 * 1000));
       gateFailures.push(`inactive ${days}d > 7d`);
     }
-  } else {
-    gateFailures.push('last_active_at unknown');
   }
+  // null lastActiveAt → no gate failure, but scoreActivity returns 0 (score penalty)
 
   if (metrics.isBotFlagged)     gateFailures.push('bot_flagged');
   if (metrics.isInsiderFlagged) gateFailures.push('insider_flagged');
 
   // ── Score breakdown ──────────────────────────────────────────
   const breakdown: ScoreBreakdown = {
-    winRatePts:      scoreWinRate(winRate),
-    tradeCountPts:   scoreTradeCount(tradeCount),
+    winRatePts:      scoreWinRate(winRate ?? 0),
+    tradeCountPts:   scoreTradeCount(tradeCount ?? 0),
     activityPts:     scoreActivity(metrics.lastActiveAt),
-    diversityPts:    scoreDiversity(diversity),
+    diversityPts:    scoreDiversity(diversity ?? 0),
     volumePts:       scoreVolume(metrics.totalVolume30d),
     cleanProfilePts: scoreCleanProfile(metrics),
   };
