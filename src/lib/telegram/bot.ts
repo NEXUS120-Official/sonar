@@ -93,3 +93,40 @@ export async function sendToChat(chatId: string, text: string): Promise<boolean>
 export function isTelegramConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID);
 }
+
+/**
+ * Register the Telegram webhook URL with Telegram.
+ * Call once after deploying to a new URL.
+ * secretToken is stored and echoed back by Telegram in x-telegram-bot-api-secret-token header.
+ */
+export async function setWebhook(
+  webhookUrl: string,
+  secretToken?: string,
+): Promise<{ ok: boolean; description?: string }> {
+  const token = getBotToken();
+  const url   = `${TELEGRAM_API_BASE}/bot${token}/setWebhook`;
+
+  const body: Record<string, unknown> = {
+    url:             webhookUrl,
+    allowed_updates: ['message', 'channel_post'],
+    drop_pending_updates: true,
+  };
+  if (secretToken) body.secret_token = secretToken;
+
+  const res  = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+  const data = await res.json() as { ok: boolean; description?: string };
+  return data;
+}
+
+/**
+ * Get current webhook info from Telegram.
+ */
+export async function getWebhookInfo(): Promise<Record<string, unknown>> {
+  const token = getBotToken();
+  const res   = await fetch(`${TELEGRAM_API_BASE}/bot${token}/getWebhookInfo`);
+  return res.json() as Promise<Record<string, unknown>>;
+}

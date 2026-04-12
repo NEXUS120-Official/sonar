@@ -10,11 +10,14 @@
 //   /whale <addr>   — whale stats summary
 //   /safety <addr>  — token safety report
 //   /top            — top whales by win rate
+//   /submit <addr>  — community wallet submission (discovery pipeline)
 
 import { createAdminClient } from '@/lib/supabase/server';
 import { formatAlertRow } from './formatter';
 import { formatUsd, formatPercent, truncateAddress, formatHours } from '@/lib/utils/format';
 import { SAFETY_EMOJI } from '@/lib/utils/constants';
+import { scoreCandidate } from '@/lib/discovery/scoring';
+import type { CandidateMetrics } from '@/lib/discovery/types';
 
 // ── HTML helpers (local, same as formatter) ───────────────────
 
@@ -205,6 +208,161 @@ export async function handleTop(): Promise<string> {
   });
 
   return [header, '', ...rows].join('\n');
+}
+
+// ── /submit <wallet_address> ──────────────────────────────────
+
+interface SubmitContext {
+  chatId:    string;
+  username?: string;
+  messageId: number;
+}
+
+export async function handleSubmit(
+  address: string,
+  ctx: SubmitContext,
+): Promise<string> {
+  if (!address) {
+    return '⚠️ Usage: /submit &lt;solana wallet address&gt;';
+  }
+
+  // Basic format validation (Solana base58 pubkey: 32-44 chars)
+  const trimmed = address.trim();
+  if (trimmed.length < 32 || trimmed.length > 44) {
+    return `❌ Invalid address format: ${code(truncateAddress(trimmed))}\nSolana addresses are 32–44 characters.`;
+  }
+
+  const db = createAdminClient();
+
+  // Check if already a tracked whale
+  const { data: existingWhale } = await db
+    .from('whales')
+    .select('id')
+    .eq('address', trimmed)
+    .maybeSingle();
+
+  if (existingWhale) {
+    return `ℹ️ ${code(truncateAddress(trimmed))} is already a tracked SONAR whale.`;
+  }
+
+  // Check if already a candidate
+  const { data: existingCandidate } = await db
+    .from('discovery_candidates')
+    .select('id, status, discovery_score')
+    .eq('address', trimmed)
+    .maybeSingle();
+
+  if (existingCandidate) {
+    return [
+      `ℹ️ ${code(truncateAddress(trimmed))} already submitted.`,
+      `Status: ${bold(existingCandidate.status)} | Score: ${existingCandidate.discovery_score}/100`,
+    ].join('\n');
+  }
+
+  // Log the submission
+  await db.from('scout_submissions').insert({
+    address:          trimmed,
+    submitted_by:     ctx.chatId,
+    telegram_username: ctx.username ?? null,
+    message_id:       ctx.messageId,
+    precheck_passed:  null,
+    precheck_notes:   'Precheck in progress',
+  });
+
+  // Run precheck: basic heuristics without heavy API calls
+  const precheckResult = await runPrecheck(trimmed);
+
+  // Record precheck result in scout_submissions
+  await db.from('scout_submissions')
+    .update({
+      precheck_passed: precheckResult.passed,
+      precheck_notes:  precheckResult.notes,
+    })
+    .eq('address', trimmed)
+    .eq('submitted_by', ctx.chatId);
+
+  if (!precheckResult.passed) {
+    return [
+      `❌ ${code(truncateAddress(trimmed))} did not pass precheck.`,
+      `Reason: ${esc(precheckResult.notes)}`,
+      '',
+      'Criteria: 32–44 char address, not already tracked, not a known system account.',
+    ].join('\n');
+  }
+
+  // Create discovery candidate with status=manual_review
+  const metrics: CandidateMetrics = {
+    address: trimmed,
+    source:  'community',
+  };
+  const scoring = scoreCandidate(metrics);
+
+  const { data: candidate, error: candidateErr } = await db
+    .from('discovery_candidates')
+    .insert({
+      address:       trimmed,
+      chain:         'solana',
+      primary_source: 'community',
+      submitted_by:  ctx.chatId,
+      status:        'manual_review',  // community submissions always go to manual review
+      discovery_score: scoring.score,
+      notes:         `Community submission via Telegram by ${ctx.username ?? ctx.chatId}`,
+      evaluated_at:  new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+
+  if (candidateErr) {
+    console.error('[commands/submit] Candidate insert failed:', candidateErr.message);
+    return '❌ Submission failed — please try again later.';
+  }
+
+  // Link submission to candidate
+  await db.from('scout_submissions')
+    .update({ candidate_id: candidate.id })
+    .eq('address', trimmed)
+    .eq('submitted_by', ctx.chatId);
+
+  // Log review event
+  await db.from('discovery_reviews').insert({
+    candidate_id: candidate.id,
+    reviewer:     'system',
+    action:       'manual_review',
+    notes:        `Community submission — awaiting curator review. Submitter: @${ctx.username ?? ctx.chatId}`,
+  });
+
+  return [
+    `✅ ${code(truncateAddress(trimmed))} submitted for review!`,
+    '',
+    'Our curators will analyze this wallet against:',
+    '• 50+ trades / 30 days',
+    '• Win rate &gt; 55%',
+    '• Active in last 7 days',
+    '• 5+ different tokens',
+    '',
+    'If approved, it will be added to the SONAR tracking list.',
+  ].join('\n');
+}
+
+// ── Precheck ──────────────────────────────────────────────────
+
+async function runPrecheck(
+  address: string,
+): Promise<{ passed: boolean; notes: string }> {
+  // Known Solana system accounts to reject immediately
+  const SYSTEM_ACCOUNTS = new Set([
+    '11111111111111111111111111111111',
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+    'So11111111111111111111111111111111111111112',
+    'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bsX',
+  ]);
+
+  if (SYSTEM_ACCOUNTS.has(address)) {
+    return { passed: false, notes: 'System program account' };
+  }
+
+  // Address looks structurally valid (already checked length above)
+  return { passed: true, notes: 'Basic precheck passed — awaiting curator review' };
 }
 
 // ── helpers ───────────────────────────────────────────────────

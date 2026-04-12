@@ -9,7 +9,9 @@
     "lint": "eslint",
     "seed:whales": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/seed-whales.ts",
     "setup:webhooks": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/setup-webhooks.ts",
-    "backfill": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/backfill-transactions.ts"
+    "backfill": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/backfill-transactions.ts",
+    "approve:candidate": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/approve-candidate.ts",
+    "review:candidates": "tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/review-candidates.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",

@@ -230,6 +230,128 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['user_whale_watchlist']['Insert']>;
         Relationships: NoRelationships;
       };
+      discovery_candidates: {
+        Row: {
+          id: string;
+          address: string;
+          chain: string;
+          win_rate_30d: number | null;
+          trade_count_30d: number | null;
+          last_active_at: string | null;
+          token_diversity_30d: number | null;
+          avg_trade_size_usd: number | null;
+          total_volume_30d: number | null;
+          instant_sell_pct: number | null;
+          is_bot_flagged: boolean;
+          is_rug_flagged: boolean;
+          is_insider_flagged: boolean;
+          discovery_score: number;
+          status: DiscoveryStatus;
+          primary_source: string;
+          submitted_by: string | null;
+          notes: string | null;
+          evaluated_at: string | null;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          promoted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          address: string;
+          id?: string;
+          chain?: string;
+          win_rate_30d?: number | null;
+          trade_count_30d?: number | null;
+          last_active_at?: string | null;
+          token_diversity_30d?: number | null;
+          avg_trade_size_usd?: number | null;
+          total_volume_30d?: number | null;
+          instant_sell_pct?: number | null;
+          is_bot_flagged?: boolean;
+          is_rug_flagged?: boolean;
+          is_insider_flagged?: boolean;
+          discovery_score?: number;
+          status?: DiscoveryStatus;
+          primary_source?: string;
+          submitted_by?: string | null;
+          notes?: string | null;
+          evaluated_at?: string | null;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          promoted_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['discovery_candidates']['Insert']>;
+        Relationships: NoRelationships;
+      };
+      discovery_candidate_sources: {
+        Row: {
+          id: string;
+          candidate_id: string;
+          source: string;
+          source_data: Json | null;
+          fetched_at: string;
+        };
+        Insert: {
+          candidate_id: string;
+          source: string;
+          id?: string;
+          source_data?: Json | null;
+          fetched_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['discovery_candidate_sources']['Insert']>;
+        Relationships: NoRelationships;
+      };
+      discovery_reviews: {
+        Row: {
+          id: string;
+          candidate_id: string;
+          reviewer: string;
+          action: string;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          candidate_id: string;
+          action: string;
+          id?: string;
+          reviewer?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['discovery_reviews']['Insert']>;
+        Relationships: NoRelationships;
+      };
+      scout_submissions: {
+        Row: {
+          id: string;
+          address: string;
+          chain: string;
+          submitted_by: string;
+          telegram_username: string | null;
+          message_id: number | null;
+          precheck_passed: boolean | null;
+          precheck_notes: string | null;
+          candidate_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          address: string;
+          submitted_by: string;
+          id?: string;
+          chain?: string;
+          telegram_username?: string | null;
+          message_id?: number | null;
+          precheck_passed?: boolean | null;
+          precheck_notes?: string | null;
+          candidate_id?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['scout_submissions']['Insert']>;
+        Relationships: NoRelationships;
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -245,3 +367,15 @@ export type Alert = Database['public']['Tables']['alerts']['Row'];
 export type TokenSafety = Database['public']['Tables']['token_safety']['Row'];
 export type UserProfile = Database['public']['Tables']['user_profiles']['Row'];
 export type UserWhaleWatchlist = Database['public']['Tables']['user_whale_watchlist']['Row'];
+export type DiscoveryCandidate = Database['public']['Tables']['discovery_candidates']['Row'];
+export type DiscoveryCandidateSource = Database['public']['Tables']['discovery_candidate_sources']['Row'];
+export type DiscoveryReview = Database['public']['Tables']['discovery_reviews']['Row'];
+export type ScoutSubmission = Database['public']['Tables']['scout_submissions']['Row'];
+
+export type DiscoveryStatus =
+  | 'pending'
+  | 'auto_reject'
+  | 'manual_review'
+  | 'auto_approve'
+  | 'promoted'
+  | 'rejected';
