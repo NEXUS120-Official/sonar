@@ -120,8 +120,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const msg = update.message ?? update.channel_post;
   if (msg) {
-    // Fire-and-forget — don't let handler errors block the 200
-    dispatch(msg).catch((err) =>
+    // Await dispatch — Vercel serverless kills unawaited work after response is sent
+    await dispatch(msg).catch((err) =>
       console.error('[webhook/telegram] Dispatch error:', err),
     );
   }
