@@ -55,8 +55,6 @@ export async function fetchBirdeyeTopTraders(
   // Try 1W first (more data), fall back to today if rate-limited
   const types = ['1W', 'today'];
 
-  const statusLog: string[] = [];
-
   for (const type of types) {
     const params = new URLSearchParams({
       type,
@@ -72,40 +70,28 @@ export async function fetchBirdeyeTopTraders(
       });
 
       if (res.status === 429) {
-        statusLog.push(`${type}=429`);
         console.warn(`[discovery/birdeye] 429 on type=${type} — trying fallback`);
         continue;
       }
 
       if (!res.ok) {
-        statusLog.push(`${type}=${res.status}`);
         console.warn(`[discovery/birdeye] HTTP ${res.status} on type=${type}`);
         continue;
       }
 
       const json = await res.json() as BirdeyeLeaderboardResponse;
       const items = json.data?.items ?? [];
-      console.log(`[discovery/birdeye] type=${type} HTTP 200 → ${items.length} traders`);
-      statusLog.push(`${type}=200(${items.length})`);
+      console.log(`[discovery/birdeye] type=${type} returned ${items.length} traders`);
 
-      const mapped = items
+      return items
         .filter((t) => t.address && t.address.length >= 32)
         .map((t) => mapTrader(t));
-
-      if (mapped.length === 0 && items.length > 0) {
-        // All items filtered — log addresses for inspection
-        console.warn(`[discovery/birdeye] All ${items.length} items filtered out. Sample address length: ${items[0]?.address?.length}`);
-      }
-
-      return mapped;
     } catch (err) {
-      statusLog.push(`${type}=error`);
       console.error(`[discovery/birdeye] Fetch error type=${type}:`, err);
     }
   }
 
-  // Throw so engine can capture this in debug output
-  throw new Error(`[birdeye] All types failed. Status log: ${statusLog.join(', ')}`);
+  return [];
 
 }
 

@@ -45,12 +45,8 @@ export async function runDiscovery(): Promise<DiscoveryRunSummary> {
   // ── Step 1: Fetch candidates from sources ─────────────────────
 
   const [birdeyeBatch, dexBatch] = await Promise.all([
-    fetchBirdeyeTopTraders(30).then((r) => {
-      summary.debug = { birdeye_adapter_count: r.length };
-      return r;
-    }).catch((e) => {
+    fetchBirdeyeTopTraders(30).catch((e) => {
       console.error('[discovery/engine] Birdeye fetch failed:', e);
-      summary.debug = { birdeye_adapter_error: String(e) };
       return [] as CandidateMetrics[];
     }),
     fetchDexScreenerCandidates(10).catch((e) => {

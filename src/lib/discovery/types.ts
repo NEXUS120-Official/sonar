@@ -71,5 +71,4 @@ export interface DiscoveryRunSummary {
   webhookSynced:    boolean;
   webhookAddresses: number;
   skipReasons:      Array<{ address: string; reason: string }>;
-  debug?:           Record<string, unknown>;
 }
