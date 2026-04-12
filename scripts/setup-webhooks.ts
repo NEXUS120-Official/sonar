@@ -18,7 +18,7 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../src/lib/supabase/types';
-import { createWebhook, listWebhooks } from '../src/lib/helius/client';
+import { createWebhook, listWebhooks, updateWebhook } from '../src/lib/helius/client';
 import type { HeliusWebhookConfig } from '../src/lib/helius/client';
 
 // ── Config ────────────────────────────────────────────────────
@@ -29,7 +29,8 @@ const appUrl         = process.env.NEXT_PUBLIC_APP_URL;
 const webhookSecret  = process.env.HELIUS_WEBHOOK_SECRET;
 const heliusApiKey   = process.env.HELIUS_API_KEY;
 
-const IS_DRY_RUN = !process.argv.includes('--apply');
+const IS_DRY_RUN  = !process.argv.includes('--apply') && !process.argv.includes('--update');
+const IS_UPDATE   = process.argv.includes('--update');
 
 // ── Validation ────────────────────────────────────────────────
 
@@ -52,7 +53,8 @@ function isPublicUrl(url: string): boolean {
 // ── Main ──────────────────────────────────────────────────────
 
 async function setupWebhooks() {
-  console.log(`[setup-webhooks] Mode: ${IS_DRY_RUN ? 'DRY RUN (pass --apply to register)' : 'APPLY'}`);
+  const mode = IS_DRY_RUN ? 'DRY RUN (pass --apply to register, --update to update existing)' : IS_UPDATE ? 'UPDATE' : 'APPLY';
+  console.log(`[setup-webhooks] Mode: ${mode}`);
   console.log('');
 
   // Validate env
@@ -121,7 +123,7 @@ async function setupWebhooks() {
     return;
   }
 
-  // Check for existing webhooks to avoid duplicates
+  // Check for existing webhooks
   console.log('[setup-webhooks] Checking existing Helius webhooks...');
   let existing;
   try {
@@ -132,14 +134,34 @@ async function setupWebhooks() {
   }
 
   const duplicate = existing.find((wh) => wh.webhookURL === webhookUrl);
+
+  if (IS_UPDATE) {
+    // ── Update mode: replace address list on existing webhook
+    if (!duplicate) {
+      console.error('[setup-webhooks] ❌ --update specified but no existing webhook found for this URL.');
+      console.error('[setup-webhooks]    Run with --apply first to create the webhook.');
+      process.exit(1);
+    }
+    console.log(`[setup-webhooks] Updating webhook ${duplicate.webhookID} with ${addresses.length} address(es)...`);
+    try {
+      const updated = await updateWebhook(duplicate.webhookID, config);
+      console.log('[setup-webhooks] ✅ Webhook updated successfully!');
+      console.log(`[setup-webhooks]    Webhook ID : ${updated.webhookID}`);
+      console.log(`[setup-webhooks]    Monitoring : ${addresses.length} address(es)`);
+    } catch (err) {
+      console.error('[setup-webhooks] ❌ Webhook update failed:', err);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (duplicate) {
     console.warn(`[setup-webhooks] ⚠️  Webhook already exists with ID: ${duplicate.webhookID}`);
-    console.warn('[setup-webhooks]    Delete it from the Helius dashboard before re-registering.');
-    console.warn('[setup-webhooks]    Or use the update flow to add new addresses to the existing webhook.');
+    console.warn('[setup-webhooks]    Run with --update to sync the address list to all active whales.');
     process.exit(0);
   }
 
-  // Register webhook
+  // Register webhook (fresh)
   console.log('[setup-webhooks] Registering webhook with Helius...');
   try {
     const created = await createWebhook(config);

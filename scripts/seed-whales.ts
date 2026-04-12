@@ -62,12 +62,19 @@ interface WhaleSeed {
 }
 
 const WHALE_SEED_LIST: WhaleSeed[] = [
-  // Approved seed list — 2026-04-11
-  { address: 'F6Fh9BjBXb1GyacHto4cwqcKF4K4xK8SwEyDv9Ayp8j9', chain: 'solana' },
-  { address: 'GnjUARqXzrCecVG6fwZ3bc322TZN435tR8Erjz4oKDM7', chain: 'solana' },
-  { address: '4EH92iYK8wua8MyqNExVeiXy5VJUAweXqJPuTWqCvNB8', chain: 'solana' },
-  { address: 'DTvNZkuNatHiurJmJTX72JyHbiZhUJ4uywf3TEqHDgJv', chain: 'solana' },
-  { address: 'HEq5VR1iu2cMC899q76BCQnFTTJrtay7NZPzmhCAWtrQ',  chain: 'solana' },
+  // Batch 1 — Approved 2026-04-11
+  { address: 'F6Fh9BjBXb1GyacHto4cwqcKF4K4xK8SwEyDv9Ayp8j9', label: 'batch1_2026-04-11_01', chain: 'solana' },
+  { address: 'GnjUARqXzrCecVG6fwZ3bc322TZN435tR8Erjz4oKDM7', label: 'batch1_2026-04-11_02', chain: 'solana' },
+  { address: '4EH92iYK8wua8MyqNExVeiXy5VJUAweXqJPuTWqCvNB8', label: 'batch1_2026-04-11_03', chain: 'solana' },
+  { address: 'DTvNZkuNatHiurJmJTX72JyHbiZhUJ4uywf3TEqHDgJv', label: 'batch1_2026-04-11_04', chain: 'solana' },
+  { address: 'HEq5VR1iu2cMC899q76BCQnFTTJrtay7NZPzmhCAWtrQ',  label: 'batch1_2026-04-11_05', chain: 'solana' },
+
+  // Batch 2 — Approved 2026-04-12
+  { address: '8g3hWBzcHQgbyp7BumxYiDhmJKjH1fbJFVhCgsKdL6qd', label: 'batch2_2026-04-12_01', chain: 'solana' },
+  { address: 'BhdumnHyu5mAv7UhWZ3gN9vBNbksJWyNpAAC438arS4W',  label: 'batch2_2026-04-12_02', chain: 'solana' },
+  { address: '3f8RhVufe7tuyNyy6G3jDVtQBcKKF74vAF7pFkgNgj75',  label: 'batch2_2026-04-12_03', chain: 'solana' },
+  { address: 'Aej8qt3e5DfKtL54nJL139PBGLY3codu5EHXfbSVCKjR',  label: 'batch2_2026-04-12_04', chain: 'solana' },
+  { address: '9oSkruZrFwctqHnmHbn4dLG86bVoYFjUcfH6mQaa26am',  label: 'batch2_2026-04-12_05', chain: 'solana' },
 ];
 
 // ── Main ──────────────────────────────────────────────────────
