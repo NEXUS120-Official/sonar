@@ -12,15 +12,17 @@ import type { CandidateMetrics } from '../types';
 
 const BIRDEYE_BASE = 'https://public-api.birdeye.so';
 
-// Response shapes (Birdeye API — fields may vary by plan tier)
+// Response shapes (Birdeye public API — verified 2026-04-12)
+// Endpoint returns: address, pnl, volume, trade_count, network
+// win_count and unique_tokens NOT available on free tier
 interface BirdeyeTrader {
   address:      string;
   pnl?:         number;
-  tradeCount?:  number;
-  winCount?:    number;
-  volume?:      number;    // USD total
-  uniqueTokens?: number;
-  lastTxTime?:  number;    // Unix seconds
+  trade_count?: number;    // actual field name (snake_case)
+  volume?:      number;    // USD total volume
+  network?:     string;
+  // Fields below are NOT returned by the free-tier endpoint:
+  // win_count, unique_tokens, last_tx_time — enrichment needed from Helius/Solscan
 }
 
 interface BirdeyeLeaderboardResponse {
@@ -51,7 +53,7 @@ export async function fetchBirdeyeTopTraders(
   }
 
   const params = new URLSearchParams({
-    type:      '1M',          // 30-day window
+    type:      '1W',          // valid values: today | 1W (1M not available on free tier)
     sort_by:   'PnL',
     sort_type: 'desc',
     offset:    '0',
@@ -88,22 +90,17 @@ export async function fetchBirdeyeTopTraders(
 // ── Mapper ────────────────────────────────────────────────────
 
 function mapTrader(t: BirdeyeTrader): CandidateMetrics {
-  const winRate =
-    t.tradeCount && t.winCount != null && t.tradeCount > 0
-      ? (t.winCount / t.tradeCount) * 100
-      : null;
-
-  const lastActiveAt =
-    t.lastTxTime ? new Date(t.lastTxTime * 1000) : null;
-
+  // Birdeye free tier does not return win_count, unique_tokens, or last_tx_time.
+  // winRate30d / tokenDiversity30d / lastActiveAt will be null here and must be
+  // enriched downstream (Solscan or Helius) before final scoring.
   return {
     address:          t.address,
     source:           'birdeye',
-    winRate30d:       winRate,
-    tradeCount30d:    t.tradeCount ?? null,
+    winRate30d:       null,   // not available from this endpoint
+    tradeCount30d:    t.trade_count ?? null,
     totalVolume30d:   t.volume ?? null,
-    tokenDiversity30d: t.uniqueTokens ?? null,
-    lastActiveAt,
+    tokenDiversity30d: null,  // not available from this endpoint
+    lastActiveAt:     null,   // not available from this endpoint
     rawData:          t as unknown as Record<string, unknown>,
   };
 }

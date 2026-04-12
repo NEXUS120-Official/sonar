@@ -16,6 +16,7 @@ import { scoreCandidate } from './scoring';
 import { fetchBirdeyeTopTraders } from './sources/birdeye';
 import { fetchDexScreenerCandidates } from './sources/dexscreener';
 import { enrichWithSolscan } from './sources/solscan';
+import { getAddressTransactions } from '@/lib/helius/client';
 import type { CandidateMetrics, DiscoveryRunSummary, DiscoverySource } from './types';
 
 // ── Public API ────────────────────────────────────────────────
@@ -103,6 +104,12 @@ export async function runDiscovery(): Promise<DiscoveryRunSummary> {
   // ── Step 4: Enrich + score + persist ─────────────────────────
 
   for (const candidate of fresh) {
+    // Enrich lastActiveAt from Helius if missing (lightweight: fetch 1 tx)
+    if (!candidate.lastActiveAt) {
+      const heliusActive = await enrichLastActiveFromHelius(candidate.address);
+      if (heliusActive) candidate.lastActiveAt = heliusActive;
+    }
+
     // Optional Solscan enrichment (overrides/supplements source metrics)
     const enriched = await enrichWithSolscan(candidate.address).catch(() => null);
     if (enriched) {
@@ -206,6 +213,21 @@ export async function runDiscovery(): Promise<DiscoveryRunSummary> {
 }
 
 // ── Internal helpers ──────────────────────────────────────────
+
+/**
+ * Fetch the most recent transaction timestamp for an address from Helius.
+ * Used to populate lastActiveAt when the source adapter doesn't provide it.
+ */
+async function enrichLastActiveFromHelius(address: string): Promise<Date | null> {
+  try {
+    const txs = await getAddressTransactions(address, { limit: 1 });
+    if (txs.length === 0) return null;
+    const ts = txs[0].timestamp;
+    return ts ? new Date(ts * 1000) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Insert an auto-approved candidate into the whales table and
