@@ -42,6 +42,22 @@ export async function runDiscovery(): Promise<DiscoveryRunSummary> {
     skipReasons:      [],
   };
 
+  // ── Debug probe: raw Birdeye status from this Lambda invocation ──
+  try {
+    const birdeyeKey = process.env.BIRDEYE_API_KEY ?? '';
+    const probeRes = await fetch(
+      'https://public-api.birdeye.so/trader/gainers-losers?type=1W&sort_by=PnL&sort_type=desc&offset=0&limit=1',
+      { headers: { 'X-API-KEY': birdeyeKey, 'x-chain': 'solana' } },
+    );
+    const probeText = await probeRes.text();
+    let probeBody: unknown;
+    try { probeBody = JSON.parse(probeText); } catch { probeBody = probeText.slice(0, 100); }
+    summary.debug = { birdeye_probe_status: probeRes.status, birdeye_probe_body: probeBody };
+    console.log(`[discovery/engine] Birdeye probe: HTTP ${probeRes.status}`);
+  } catch (err) {
+    summary.debug = { birdeye_probe_error: String(err) };
+  }
+
   // ── Step 1: Fetch candidates from sources ─────────────────────
 
   const [birdeyeBatch, dexBatch] = await Promise.all([
