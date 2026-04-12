@@ -63,7 +63,7 @@ export async function fetchBirdeyeTopTraders(
       sort_by:   'PnL',
       sort_type: 'desc',
       offset:    '0',
-      limit:     String(Math.min(limit, 50)),
+      limit:     String(Math.min(limit, 10)),
     });
 
     try {
