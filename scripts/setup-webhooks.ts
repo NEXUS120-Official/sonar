@@ -20,6 +20,12 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../src/lib/supabase/types';
 import { createWebhook, listWebhooks, updateWebhook } from '../src/lib/helius/client';
 import type { HeliusWebhookConfig } from '../src/lib/helius/client';
+import {
+  KNOWN_EXCHANGE_ADDRESSES,
+  KNOWN_STAKING_ADDRESSES,
+  KNOWN_DEFI_ADDRESSES,
+  WEBHOOK_CONFIG,
+} from '../src/lib/utils/constants';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -77,36 +83,55 @@ async function setupWebhooks() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // Fetch active whale addresses
+  // ── Collect addresses to monitor ─────────────────────────────
+  // 1. Known exchange hot wallets (always monitored)
+  const knownAddresses: string[] = [
+    ...KNOWN_EXCHANGE_ADDRESSES.map((a) => a.address),
+    ...KNOWN_STAKING_ADDRESSES.map((a) => a.address),
+    ...KNOWN_DEFI_ADDRESSES.map((a) => a.address),
+  ];
+
+  // 2. Active whale addresses from DB
   console.log('[setup-webhooks] Fetching active whale addresses...');
   const { data: whales, error } = await db
     .from('whales')
     .select('address, label, chain')
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .limit(WEBHOOK_CONFIG.max_whale_addresses);
 
   if (error) {
     console.error('[setup-webhooks] ❌ Supabase error:', error.message);
     process.exit(1);
   }
 
-  const addresses = (whales ?? []).map((w) => w.address);
+  const whaleAddresses = (whales ?? []).map((w) => w.address);
 
-  if (addresses.length === 0) {
-    console.error('[setup-webhooks] ❌ No active whale addresses found in DB. Run seed:whales first.');
-    process.exit(1);
+  // Deduplicate and cap to total_budget
+  const addresses = [
+    ...new Set([...knownAddresses, ...whaleAddresses]),
+  ].slice(0, WEBHOOK_CONFIG.total_budget);
+
+  console.log('[setup-webhooks] Address breakdown:');
+  console.log(`  Known exchanges : ${KNOWN_EXCHANGE_ADDRESSES.length}`);
+  console.log(`  Known staking   : ${KNOWN_STAKING_ADDRESSES.length}`);
+  console.log(`  Known DeFi      : ${KNOWN_DEFI_ADDRESSES.length}`);
+  console.log(`  Active whales   : ${whaleAddresses.length}`);
+  console.log(`  Total (deduped) : ${addresses.length} / ${WEBHOOK_CONFIG.total_budget} budget`);
+
+  if (whaleAddresses.length > 0) {
+    console.log('');
+    console.log('[setup-webhooks] Whale addresses:');
+    (whales ?? []).forEach((w) => {
+      console.log(`  ${w.address} ${w.label ? `(${w.label})` : ''}`);
+    });
   }
-
-  console.log(`[setup-webhooks] Found ${addresses.length} active whale(s):`);
-  (whales ?? []).forEach((w) => {
-    console.log(`  ${w.chain} | ${w.address} ${w.label ? `(${w.label})` : ''}`);
-  });
   console.log('');
 
   // Build webhook config
   const webhookUrl = `${appUrl ?? 'https://YOUR_APP_URL'}/api/webhook/helius`;
   const config: HeliusWebhookConfig = {
     webhookURL:         webhookUrl,
-    transactionTypes:   ['SWAP'],
+    transactionTypes:   [...WEBHOOK_CONFIG.transaction_types],
     accountAddresses:   addresses,
     webhookType:        'enhanced',
     encoding:           'jsonParsed',
@@ -169,7 +194,7 @@ async function setupWebhooks() {
     console.log(`[setup-webhooks]    Webhook ID : ${created.webhookID}`);
     console.log(`[setup-webhooks]    Webhook URL: ${created.webhookURL}`);
     console.log(`[setup-webhooks]    Monitoring : ${addresses.length} address(es)`);
-    console.log(`[setup-webhooks]    Types      : SWAP`);
+    console.log(`[setup-webhooks]    Types      : ${WEBHOOK_CONFIG.transaction_types.join(', ')}`);
     console.log('');
     console.log('[setup-webhooks] ⚠️  Save this webhook ID — you will need it to update/delete the webhook:');
     console.log(`[setup-webhooks]    ${created.webhookID}`);

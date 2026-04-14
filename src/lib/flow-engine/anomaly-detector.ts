@@ -16,15 +16,18 @@
 import { FLOW_THRESHOLDS } from '@/lib/utils/constants';
 import type { AlertRow, AlertType, AlertSeverity } from '@/lib/supabase/types';
 import type { FlowMetrics } from './aggregator';
+import { isSuppressed, signalValueFor, type RecentAlertMap } from './dedup';
 
 // ── Types ─────────────────────────────────────────────────────
 
 export type AlertInsert = Omit<AlertRow, 'id' | 'created_at'>;
 
 export interface AnomalyInput {
-  current:  FlowMetrics;
-  baseline: FlowMetrics | null;  // null on first run (no history yet)
-  windowHours: number;
+  current:      FlowMetrics;
+  baseline:     FlowMetrics | null;  // null on first run (no history yet)
+  windowHours:  number;
+  /** Most-recent fired alert per type, used for cooldown + min-change dedup. */
+  recentAlerts?: RecentAlertMap;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -62,8 +65,9 @@ function baseAlert(type: AlertType): Omit<AlertInsert, 'severity' | 'title' | 'b
  * Fires if no baseline is available AND volume exceeds absolute threshold.
  */
 function detectExchangeSpike(
-  current: FlowMetrics,
-  baseline: FlowMetrics | null,
+  current:   FlowMetrics,
+  baseline:  FlowMetrics | null,
+  lastAlert: AlertRow | null,
 ): AlertInsert | null {
   const currentVolume  = current.sol_exchange_inflow_usd + current.sol_exchange_outflow_usd;
   const baselineVolume = baseline
@@ -78,6 +82,11 @@ function detectExchangeSpike(
       : currentVolume >= 2_000_000; // absolute fallback when no baseline
 
   if (!isSpike) return null;
+
+  if (isSuppressed('exchange_spike', lastAlert, currentVolume)) {
+    console.log(`[anomaly] exchange_spike suppressed by cooldown/dedup (volume: ${fmtUsd(currentVolume)})`);
+    return null;
+  }
 
   const ratio = baselineVolume ? (currentVolume / baselineVolume).toFixed(1) : 'N/A';
 
@@ -106,10 +115,18 @@ function detectExchangeSpike(
 /**
  * Accumulation wave: net exchange outflow >= threshold (bullish).
  */
-function detectAccumulationWave(current: FlowMetrics): AlertInsert | null {
+function detectAccumulationWave(
+  current:   FlowMetrics,
+  lastAlert: AlertRow | null,
+): AlertInsert | null {
   // Negative net_exchange_flow = more withdrawals than deposits = accumulation
   const netOutflow = -current.sol_net_exchange_flow_usd;
   if (netOutflow < FLOW_THRESHOLDS.alert.accumulation_wave_usd) return null;
+
+  if (isSuppressed('accumulation_wave', lastAlert, netOutflow)) {
+    console.log(`[anomaly] accumulation_wave suppressed by cooldown/dedup (outflow: ${fmtUsd(netOutflow)})`);
+    return null;
+  }
 
   console.log(`[anomaly] accumulation_wave detected — net outflow: ${fmtUsd(netOutflow)}`);
 
@@ -133,9 +150,17 @@ function detectAccumulationWave(current: FlowMetrics): AlertInsert | null {
 /**
  * Distribution wave: net exchange inflow >= threshold (bearish).
  */
-function detectDistributionWave(current: FlowMetrics): AlertInsert | null {
+function detectDistributionWave(
+  current:   FlowMetrics,
+  lastAlert: AlertRow | null,
+): AlertInsert | null {
   const netInflow = current.sol_net_exchange_flow_usd;
   if (netInflow < FLOW_THRESHOLDS.alert.distribution_wave_usd) return null;
+
+  if (isSuppressed('distribution_wave', lastAlert, netInflow)) {
+    console.log(`[anomaly] distribution_wave suppressed by cooldown/dedup (inflow: ${fmtUsd(netInflow)})`);
+    return null;
+  }
 
   console.log(`[anomaly] distribution_wave detected — net inflow: ${fmtUsd(netInflow)}`);
 
@@ -159,9 +184,17 @@ function detectDistributionWave(current: FlowMetrics): AlertInsert | null {
 /**
  * Staking shift: large net staking or unstaking event.
  */
-function detectStakingShift(current: FlowMetrics): AlertInsert | null {
+function detectStakingShift(
+  current:   FlowMetrics,
+  lastAlert: AlertRow | null,
+): AlertInsert | null {
   const absNet = Math.abs(current.net_staking_flow_usd);
   if (absNet < FLOW_THRESHOLDS.alert.staking_shift_usd) return null;
+
+  if (isSuppressed('staking_shift', lastAlert, absNet)) {
+    console.log(`[anomaly] staking_shift suppressed by cooldown/dedup (absNet: ${fmtUsd(absNet)})`);
+    return null;
+  }
 
   const isStaking = current.net_staking_flow_usd > 0;
   console.log(
@@ -187,27 +220,100 @@ function detectStakingShift(current: FlowMetrics): AlertInsert | null {
   };
 }
 
+// ── Flow reversal ─────────────────────────────────────────────
+
+/**
+ * Flow reversal: the dominant direction of 4h exchange net flow has flipped
+ * between the prior snapshot and the current snapshot.
+ *
+ * Conditions:
+ *   1. Both current and baseline must have |net_exchange_flow| >= flow_reversal_min_usd
+ *   2. Their signs must be opposite (bullish→bearish or bearish→bullish)
+ *
+ * This is inherently a 2-snapshot detection — the "confirmed flip" that the
+ * sprint requires. A single noisy outlier cannot trigger it alone.
+ */
+function detectFlowReversal(
+  current:   FlowMetrics,
+  baseline:  FlowMetrics | null,
+  lastAlert: AlertRow | null,
+): AlertInsert | null {
+  if (!baseline) return null;  // No history yet — can't detect a flip
+
+  const minUsd = FLOW_THRESHOLDS.alert.flow_reversal_min_usd;
+  const curNet  = current.sol_net_exchange_flow_usd;
+  const prevNet = baseline.sol_net_exchange_flow_usd;
+
+  // Both sides must exceed the minimum to confirm a real move
+  if (Math.abs(curNet) < minUsd || Math.abs(prevNet) < minUsd) return null;
+
+  // Signs must be opposite
+  const flipped = (curNet > 0 && prevNet < 0) || (curNet < 0 && prevNet > 0);
+  if (!flipped) return null;
+
+  const magnitudeUsd = Math.abs(curNet);
+
+  if (isSuppressed('flow_reversal', lastAlert, magnitudeUsd)) {
+    console.log(`[anomaly] flow_reversal suppressed by cooldown/dedup (magnitude: ${fmtUsd(magnitudeUsd)})`);
+    return null;
+  }
+
+  const direction = curNet < 0
+    ? ('bearish_to_bullish' as const)   // was positive (bearish inflow), now negative (bullish outflow)
+    : ('bullish_to_bearish' as const);  // was negative (bullish outflow), now positive (bearish inflow)
+
+  const dirLabel = direction === 'bearish_to_bullish'
+    ? 'bearish → bullish'
+    : 'bullish → bearish';
+
+  console.log(
+    `[anomaly] flow_reversal detected — ${dirLabel}` +
+    ` | prev: ${fmtUsd(prevNet)} → cur: ${fmtUsd(curNet)}`,
+  );
+
+  return {
+    ...baseAlert('flow_reversal'),
+    severity: severity(magnitudeUsd),
+    title:    `Flow reversal — ${dirLabel} (${fmtUsd(magnitudeUsd)})`,
+    body:
+      `Exchange net flow has reversed direction. ` +
+      `Previous 4h window: ${fmtUsd(prevNet)} net ${prevNet > 0 ? 'inflow (bearish)' : 'outflow (bullish)'}. ` +
+      `Current 4h window:  ${fmtUsd(curNet)} net ${curNet  > 0 ? 'inflow (bearish)' : 'outflow (bullish)'}. ` +
+      `This directional flip may signal a near-term trend change.`,
+    data: {
+      previous_net_exchange_usd: prevNet,
+      current_net_exchange_usd:  curNet,
+      direction,
+      magnitude_usd:             magnitudeUsd,
+    },
+  };
+}
+
 // ── Main export ───────────────────────────────────────────────
 
 /**
  * Run all anomaly detectors on the current snapshot vs baseline.
  * Returns alert payloads ready for DB insert.
+ * Pass `recentAlerts` (most-recent fired row per type) to enable cooldown/dedup.
  */
 export function detectAnomalies(input: AnomalyInput): AlertInsert[] {
-  const { current, baseline } = input;
+  const { current, baseline, recentAlerts = {} } = input;
   const alerts: AlertInsert[] = [];
 
-  const spike = detectExchangeSpike(current, baseline);
+  const spike = detectExchangeSpike(current, baseline, recentAlerts['exchange_spike'] ?? null);
   if (spike)  alerts.push(spike);
 
-  const accum = detectAccumulationWave(current);
+  const accum = detectAccumulationWave(current, recentAlerts['accumulation_wave'] ?? null);
   if (accum)  alerts.push(accum);
 
-  const dist  = detectDistributionWave(current);
+  const dist  = detectDistributionWave(current, recentAlerts['distribution_wave'] ?? null);
   if (dist)   alerts.push(dist);
 
-  const stake = detectStakingShift(current);
+  const stake = detectStakingShift(current, recentAlerts['staking_shift'] ?? null);
   if (stake)  alerts.push(stake);
+
+  const reversal = detectFlowReversal(current, baseline, recentAlerts['flow_reversal'] ?? null);
+  if (reversal) alerts.push(reversal);
 
   console.log(`[anomaly] ${alerts.length} alert(s) generated`);
   return alerts;

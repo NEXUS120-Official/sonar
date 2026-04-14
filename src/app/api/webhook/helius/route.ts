@@ -12,9 +12,10 @@
 // ============================================================
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient }               from '@/lib/supabase/server';
 import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
-import type { MovementRow } from '@/lib/supabase/types';
+import { getCachedSolPrice }               from '@/lib/helius/sol-price-cache';
+import type { MovementRow }                from '@/lib/supabase/types';
 
 const WEBHOOK_AUTH_HEADER = 'authorization';
 
@@ -122,13 +123,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   log('info', `Received ${transactions.length} transaction(s)`);
 
-  // ── 3. Load whale address set (for whale_transfer detection) ─
-  const whaleAddresses = await fetchWhaleAddressSet();
+  // ── 3. Fetch live SOL price + whale addresses in parallel ─
+  const [whaleAddresses, solPriceUsd] = await Promise.all([
+    fetchWhaleAddressSet(),
+    getCachedSolPrice(),
+  ]);
+  log('info', `SOL price: $${solPriceUsd.toFixed(2)}`);
 
   // ── 4. Classify each transaction ──────────────────────────
   const movements = (transactions as HeliusEnhancedTx[]).map((tx) => {
     try {
-      return parseMovement(tx, whaleAddresses);
+      return parseMovement(tx, whaleAddresses, solPriceUsd);
     } catch (err) {
       log('warn', `Failed to parse tx ${tx?.signature ?? 'unknown'}`, err);
       return null;

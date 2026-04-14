@@ -15,6 +15,7 @@
 
 import { lookupAddress } from '@/lib/helius/known-addresses';
 import { FLOW_THRESHOLDS, SOL_NATIVE_MINT, USDC_MINT, USDT_MINT } from '@/lib/utils/constants';
+import { SOL_PRICE_FALLBACK_USD } from '@/lib/helius/sol-price-cache';
 import type { FlowType, FlowDirection } from '@/lib/supabase/types';
 
 // ── Helius enhanced transaction shape (relevant fields only) ──
@@ -70,10 +71,10 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
 const SOL_DECIMALS     = 9;
 const USDC_DECIMALS    = 6;
 
-// Approximate SOL price used as a fallback when no price feed is available.
-// This gives us a rough USD estimate for threshold filtering.
-// The actual USD value is enriched later by the price pipeline.
-const SOL_PRICE_FALLBACK_USD = 130; // update periodically
+// SOL_PRICE_FALLBACK_USD is imported from sol-price-cache.ts.
+// parseMovement() accepts solPriceUsd as an optional parameter — callers
+// should supply a fresh price via getCachedSolPrice(); the fallback is used
+// only when no price is provided (e.g. in unit tests or first cold start).
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -129,12 +130,14 @@ function dominantStableTransfer(
  * @param knownWhalAddresses  Set of whale addresses currently tracked
  */
 export function parseMovement(
-  tx: HeliusEnhancedTx,
+  tx:                   HeliusEnhancedTx,
   knownWhaleAddresses?: Set<string>,
+  /** Live SOL price in USD. Supply via getCachedSolPrice(); falls back to compile-time constant. */
+  solPriceUsd:          number = SOL_PRICE_FALLBACK_USD,
 ): ParsedMovement | null {
   // Minimum lamports for a native transfer to be considered
-  const minSolUsd  = FLOW_THRESHOLDS.min_movement_usd;
-  const minLamports = Math.ceil((minSolUsd / SOL_PRICE_FALLBACK_USD) * LAMPORTS_PER_SOL);
+  const minSolUsd   = FLOW_THRESHOLDS.min_movement_usd;
+  const minLamports = Math.ceil((minSolUsd / solPriceUsd) * LAMPORTS_PER_SOL);
   const minUsdcRaw  = minSolUsd * Math.pow(10, USDC_DECIMALS);
 
   const blockTime = isoFromUnix(tx.timestamp);
@@ -148,7 +151,7 @@ export function parseMovement(
       to:        nativeTx.toUserAccount,
       token:     'SOL',
       amount:    lamportsToSol(nativeTx.amount),
-      amountUsd: lamportsToSol(nativeTx.amount) * SOL_PRICE_FALLBACK_USD,
+      amountUsd: lamportsToSol(nativeTx.amount) * solPriceUsd,
       blockTime,
       knownWhaleAddresses,
     });
@@ -243,6 +246,17 @@ function classifyTransfer(input: TransferClassifyInput): ParsedMovement | null {
     protocol       = toInfo.sub_category;
   } else if (fromInfo?.category === 'defi') {
     flow_type      = 'defi_withdrawal';
+    flow_direction = 'outflow';
+    protocol       = fromInfo.sub_category;
+  }
+
+  // ── Bridge flows ──────────────────────────────────────────
+  else if (toInfo?.category === 'bridge') {
+    flow_type      = 'bridge_in';
+    flow_direction = 'inflow';
+    protocol       = toInfo.sub_category;
+  } else if (fromInfo?.category === 'bridge') {
+    flow_type      = 'bridge_out';
     flow_direction = 'outflow';
     protocol       = fromInfo.sub_category;
   }

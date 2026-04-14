@@ -71,6 +71,8 @@ function formatWindow(s: FlowSnapshotRow) {
     window_hours:             s.window_hours,
     bias_score:               s.bias_score,
     market_bias:              s.market_bias,
+    confirmation_count:       s.confirmation_count,      // 0–3 sub-signals agreeing with bias
+    staking_velocity_pct:     s.staking_velocity_pct,    // rate of change vs prior 4h (4h window only)
     exchange: {
       inflow_usd:             s.sol_exchange_inflow_usd,
       outflow_usd:            s.sol_exchange_outflow_usd,

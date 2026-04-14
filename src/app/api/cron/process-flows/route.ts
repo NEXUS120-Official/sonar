@@ -18,15 +18,17 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import {
   aggregateMovements,
+  computeStakingVelocity,
   filterToWindow,
   windowCutoff,
   type SnapshotInsert,
   type SnapshotWindow,
 } from '@/lib/flow-engine/aggregator';
 import { detectAnomalies, type AlertInsert } from '@/lib/flow-engine/anomaly-detector';
-import { generateAlertAnalysis } from '@/lib/ai/alert-writer';
-import { SNAPSHOT_WINDOWS } from '@/lib/utils/constants';
-import type { MovementRow, FlowSnapshotRow } from '@/lib/supabase/types';
+import { type RecentAlertMap }               from '@/lib/flow-engine/dedup';
+import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
+import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
+import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType } from '@/lib/supabase/types';
 import type { FlowMetrics } from '@/lib/flow-engine/aggregator';
 
 // ── Logging ───────────────────────────────────────────────────
@@ -81,10 +83,12 @@ function snapshotToMetrics(s: SnapshotInsert): FlowMetrics {
     defi_deposit_usd:    s.defi_deposit_usd,
     defi_withdrawal_usd: s.defi_withdrawal_usd,
     net_defi_flow_usd:   s.net_defi_flow_usd,
-    large_movements_count: s.large_movements_count,
-    unique_whales_active:  s.unique_whales_active,
-    bias_score:  s.bias_score ?? 0,
-    market_bias: s.market_bias ?? 'neutral',
+    large_movements_count:  s.large_movements_count,
+    unique_whales_active:   s.unique_whales_active,
+    bias_score:             s.bias_score ?? 0,
+    market_bias:            s.market_bias ?? 'neutral',
+    confirmation_count:     s.confirmation_count ?? 0,
+    staking_velocity_pct:   s.staking_velocity_pct ?? null,
   };
 }
 
@@ -149,7 +153,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── 3. Persist snapshots ────────────────────────────────────
+  // ── 3. Enrich 4h snapshot with staking velocity ─────────────
+  // Load the prior 4h snapshot NOW (before persisting) so we can store
+  // staking_velocity_pct in the same insert. This avoids a second UPDATE round-trip.
+  const snapshot4h = snapshots.find((s) => s.window_hours === 4);
+  let baseline: FlowSnapshotRow | null = null;
+
+  if (snapshot4h) {
+    const { data: baselineRaw } = await db
+      .from('flow_snapshots')
+      .select('*')
+      .eq('window_hours', 4)
+      .lt('snapshot_time', now.toISOString())
+      .order('snapshot_time', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    baseline = baselineRaw as FlowSnapshotRow | null;
+
+    if (baseline) {
+      snapshot4h.staking_velocity_pct = computeStakingVelocity(
+        snapshot4h.net_staking_flow_usd,
+        baseline.net_staking_flow_usd,
+      );
+      log('info', `Staking velocity: ${snapshot4h.staking_velocity_pct?.toFixed(2) ?? 'n/a'}%`);
+    }
+  }
+
+  // ── 4. Persist snapshots ────────────────────────────────────
   if (snapshots.length > 0) {
     log('info', `Persisting ${snapshots.length} snapshot(s)`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,25 +199,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── 4. Anomaly detection (on 4h window — sensitive but not noisy) ──
-  const snapshot4h = snapshots.find((s) => s.window_hours === 4);
+  // ── 5. Anomaly detection (on 4h window — sensitive but not noisy) ──
   if (snapshot4h) {
-    // Load previous 4h snapshot as baseline (last one before now)
-    const { data: baselineRaw } = await db
-      .from('flow_snapshots')
-      .select('*')
-      .eq('window_hours', 4)
-      .lt('snapshot_time', now.toISOString())
-      .order('snapshot_time', { ascending: false })
-      .limit(1)
-      .maybeSingle();
 
-    const baseline = baselineRaw as FlowSnapshotRow | null;
+    // ── Load recent alerts for cooldown/dedup ─────────────────
+    // Query most-recent alert per type within the longest cooldown window (4h).
+    // We fetch up to 20 rows ordered newest-first, then keep the first per type.
+    const maxCooldownMs  = Math.max(...Object.values(ALERT_COOLDOWNS_MS));
+    const cooldownCutoff = new Date(now.getTime() - maxCooldownMs).toISOString();
+
+    const { data: recentAlertsRaw } = await db
+      .from('alerts')
+      .select('*')
+      .gte('created_at', cooldownCutoff)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const recentAlerts: RecentAlertMap = {};
+    for (const row of (recentAlertsRaw ?? []) as AlertRow[]) {
+      const t = row.alert_type as AlertType;
+      if (!recentAlerts[t]) recentAlerts[t] = row;
+    }
+    log('info', `Loaded ${Object.keys(recentAlerts).length} recent alert type(s) for dedup`);
 
     const anomalies = detectAnomalies({
-      current:     snapshotToMetrics(snapshot4h),
-      baseline:    baseline ? rowToMetrics(baseline) : null,
-      windowHours: 4,
+      current:      snapshotToMetrics(snapshot4h),
+      baseline:     baseline ? rowToMetrics(baseline) : null,
+      windowHours:  4,
+      recentAlerts,
     });
 
     if (anomalies.length > 0) {

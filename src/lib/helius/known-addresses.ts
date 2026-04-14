@@ -9,6 +9,7 @@ import {
   KNOWN_EXCHANGE_ADDRESSES,
   KNOWN_STAKING_ADDRESSES,
   KNOWN_DEFI_ADDRESSES,
+  KNOWN_BRIDGE_ADDRESSES,
 } from '@/lib/utils/constants';
 import type { KnownAddressCategory } from '@/lib/supabase/types';
 
@@ -32,6 +33,9 @@ function buildLookupMap(): Map<string, KnownAddressInfo> {
   }
   for (const entry of KNOWN_DEFI_ADDRESSES) {
     map.set(entry.address, { ...entry, category: 'defi' });
+  }
+  for (const entry of KNOWN_BRIDGE_ADDRESSES) {
+    map.set(entry.address, { ...entry, category: 'bridge' });
   }
 
   return map;

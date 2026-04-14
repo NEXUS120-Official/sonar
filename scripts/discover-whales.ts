@@ -90,6 +90,17 @@ const TOKEN_SOURCES = [
   { mint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',  symbol: 'BSOL',   decimals: 9 },
   { mint: '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs', symbol: 'WETH',   decimals: 8 },
   { mint: '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh', symbol: 'WBTC',   decimals: 8 },
+  // R6 additions — liquid staked SOL (mints from constants.ts, already verified)
+  // Large holders = institutional stakers; Marinade + Jito program addrs already in INFRA_SET
+  { mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', symbol: 'MSOL',    decimals: 9 },
+  { mint: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', symbol: 'JITOSOL', decimals: 9 },
+  // R7 additions — validated via getTokenLargestAccounts: 10/10 real wallet owners, 0 program accounts
+  // HNT: Helium IoT network — 10 top holders all real wallets, $2.4M–$13.7M each, zero DB overlap
+  { mint: 'hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux', symbol: 'HNT',    decimals: 8 },
+  // INF: Sanctum Infinity LST pool — institutional stakers up to $73M, 10/10 real wallets
+  { mint: '5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm', symbol: 'INF',    decimals: 9 },
+  // JLP: Jupiter Perps LP token — 10/10 real wallets, top 2 already tracked (validation), 8 new candidates
+  { mint: '27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4', symbol: 'JLP',    decimals: 6 },
 ] as const;
 
 const ARTIFACT_DIR = 'artifacts/discovery';

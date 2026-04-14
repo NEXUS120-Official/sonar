@@ -45,6 +45,7 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   accumulation_wave:  '🟢 Accumulation Wave',
   distribution_wave:  '🔴 Distribution Wave',
   staking_shift:      '⚡ Staking Shift',
+  flow_reversal:      '🔀 Flow Reversal',
   defi_rotation:      '🔄 DeFi Rotation',
   stablecoin_flow:    '💵 Stablecoin Flow',
   whale_large_move:   '🐋 Whale Move',

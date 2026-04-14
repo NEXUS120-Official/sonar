@@ -28,6 +28,7 @@ export type AlertType =
   | 'accumulation_wave'
   | 'distribution_wave'
   | 'staking_shift'
+  | 'flow_reversal'
   | 'defi_rotation'
   | 'stablecoin_flow'
   | 'whale_large_move'
@@ -118,8 +119,10 @@ export interface FlowSnapshotRow {
   net_defi_flow_usd: number;
   large_movements_count: number;
   unique_whales_active: number;
-  market_bias: MarketBias | null;
-  bias_score: number | null;
+  market_bias:        MarketBias | null;
+  bias_score:         number | null;
+  confirmation_count: number | null;   // 0–3: sub-signals agreeing with bias direction
+  staking_velocity_pct: number | null; // rate of change in net_staking vs prior 4h snapshot
   created_at: string;
 }
 
