@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/process-flows",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/send-alerts",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/update-balances",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/discover-whales",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}

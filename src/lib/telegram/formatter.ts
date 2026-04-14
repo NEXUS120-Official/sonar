@@ -1,18 +1,15 @@
 // ============================================================
-// SONAR — Telegram Alert Formatter
+// SONAR v2.0 — Telegram Alert Formatter
 // ============================================================
-// Produces HTML-formatted messages for Telegram channel delivery.
-// Uses HTML parse mode (safer than MarkdownV2 for dynamic content).
+// Formats flow alerts for Telegram delivery (HTML parse mode).
 
-import { formatUsd, formatPercent, truncateAddress, formatHours } from '@/lib/utils/format';
-import { SAFETY_EMOJI } from '@/lib/utils/constants';
-import type { ResolvedConsensusAlert } from '@/lib/consensus/types';
-import type { Alert } from '@/lib/supabase/types';
+import { formatUsd } from '@/lib/utils/format';
+import { SEVERITY_LABELS, EXTERNAL_URLS } from '@/lib/utils/constants';
+import type { AlertRow, AlertType } from '@/lib/supabase/types';
 
 // ── HTML helpers ──────────────────────────────────────────────
 
 function esc(text: string): string {
-  // Escape HTML special characters for Telegram HTML parse mode
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -21,7 +18,7 @@ function esc(text: string): string {
 }
 
 function bold(text: string): string {
-  return `<b>${esc(text)}</b>`;
+  return `<b>${text}</b>`; // caller must pre-escape
 }
 
 function link(text: string, url: string): string {
@@ -32,124 +29,6 @@ function code(text: string): string {
   return `<code>${esc(text)}</code>`;
 }
 
-// ── Consensus signal formatting ───────────────────────────────
-
-function consensusEmoji(level: number): string {
-  if (level >= 4) return '💎';
-  if (level >= 3) return '🔥';
-  return '⚡';
-}
-
-function consensusDisplay(level: number): string {
-  if (level >= 4) return 'ULTRA SIGNAL';
-  if (level >= 3) return 'STRONG SIGNAL';
-  return 'EMERGING SIGNAL';
-}
-
-// ── Public formatters ─────────────────────────────────────────
-
-/**
- * Format a ResolvedConsensusAlert into a Telegram HTML message.
- * Used immediately after the alert is generated (before DB insert round-trip).
- */
-export function formatConsensusAlert(alert: ResolvedConsensusAlert): string {
-  const symbol  = alert.tokenSymbol ? `$${esc(alert.tokenSymbol)}` : code(truncateAddress(alert.tokenAddress));
-  const emoji   = consensusEmoji(alert.consensusLevel);
-  const display = consensusDisplay(alert.consensusLevel);
-
-  const safetyEmoji = SAFETY_EMOJI[alert.safetyLevel];
-
-  const volumeLine = alert.totalWhaleVolumeUsd != null
-    ? `💰 Whale volume: ${bold(formatUsd(alert.totalWhaleVolumeUsd))}`
-    : '💰 Whale volume: unknown (SOL-denominated)';
-
-  const ageLine = alert.tokenAgeHours != null
-    ? `⏱️ Age: ${formatHours(alert.tokenAgeHours)}`
-    : null;
-
-  const holdersLine = alert.tokenHolders != null
-    ? `👥 Holders: ${alert.tokenHolders.toLocaleString()}`
-    : null;
-
-  const metaLine = [ageLine, holdersLine].filter(Boolean).join('  |  ');
-
-  const whaleLines = alert.whaleBuys
-    .map((b) => {
-      const winRate = b.winRate7d != null ? ` (${formatPercent(b.winRate7d)} WR)` : '';
-      const amount  = b.amountUsd != null ? ` · ${formatUsd(b.amountUsd)}` : '';
-      return `  • ${code(truncateAddress(b.whaleAddress))}${winRate}${amount}`;
-    })
-    .join('\n');
-
-  const lines = [
-    `${emoji} ${bold(display)} — ${symbol}`,
-    '',
-    `🐋 ${bold(String(alert.consensusLevel))} whales accumulated in the last 4h`,
-    whaleLines,
-    '',
-    volumeLine,
-    `🛡️ Safety: ${bold(String(alert.safetyScore))}/100 ${safetyEmoji}`,
-    metaLine || null,
-    '',
-    `${link('Trade on Jupiter', alert.jupiterSwapUrl)}  |  ${link('Chart', alert.birdeyeUrl)}`,
-  ]
-    .filter((l): l is string => l !== null)
-    .join('\n');
-
-  return lines;
-}
-
-/**
- * Format an Alert row from the DB into a Telegram HTML message.
- * Used by /consensus command to re-render stored alerts.
- */
-export function formatAlertRow(alert: Alert): string {
-  const symbol = alert.token_symbol
-    ? `$${esc(alert.token_symbol)}`
-    : code(truncateAddress(alert.token_address));
-
-  const level   = alert.consensus_level ?? 2;
-  const emoji   = consensusEmoji(level);
-  const display = consensusDisplay(level);
-
-  const safetyPart = alert.safety_score != null && alert.safety_level != null
-    ? `🛡️ Safety: ${bold(String(alert.safety_score))}/100 ${SAFETY_EMOJI[alert.safety_level]}`
-    : null;
-
-  const volumePart = alert.total_whale_volume_usd != null
-    ? `💰 Volume: ${bold(formatUsd(alert.total_whale_volume_usd))}`
-    : null;
-
-  const agePart = alert.token_age_hours != null
-    ? `⏱️ Age: ${formatHours(alert.token_age_hours)}`
-    : null;
-
-  const jupiterPart = alert.jupiter_swap_url
-    ? link('Trade on Jupiter', alert.jupiter_swap_url)
-    : null;
-
-  const birdeyePart = alert.birdeye_url
-    ? link('Chart', alert.birdeye_url)
-    : null;
-
-  const linkLine = [jupiterPart, birdeyePart].filter(Boolean).join('  |  ') || null;
-
-  const ts = `🕐 ${formatRelativeTimestamp(alert.created_at)}`;
-
-  const lines = [
-    `${emoji} ${bold(display)} — ${symbol}`,
-    `🐋 ${bold(String(level))} whale${level !== 1 ? 's' : ''} · ${ts}`,
-    volumePart,
-    safetyPart,
-    agePart,
-    linkLine,
-  ]
-    .filter((l): l is string => l !== null)
-    .join('\n');
-
-  return lines;
-}
-
 function formatRelativeTimestamp(iso: string): string {
   const diffMs  = Date.now() - new Date(iso).getTime();
   const diffMin = Math.floor(diffMs / 60_000);
@@ -157,4 +36,191 @@ function formatRelativeTimestamp(iso: string): string {
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
   return `${Math.floor(diffHr / 24)}d ago`;
+}
+
+// ── Alert type → emoji + label ────────────────────────────────
+
+const ALERT_TYPE_LABELS: Record<AlertType, string> = {
+  exchange_spike:     '📈 Exchange Spike',
+  accumulation_wave:  '🟢 Accumulation Wave',
+  distribution_wave:  '🔴 Distribution Wave',
+  staking_shift:      '⚡ Staking Shift',
+  defi_rotation:      '🔄 DeFi Rotation',
+  stablecoin_flow:    '💵 Stablecoin Flow',
+  whale_large_move:   '🐋 Whale Move',
+  weekly_report:      '📊 Weekly Report',
+};
+
+// ── Numeric context from data JSONB ───────────────────────────
+
+function formatDataLines(alertType: AlertType, data: Record<string, unknown> | null): string[] {
+  if (!data) return [];
+  const lines: string[] = [];
+
+  const fmtUsd = (v: unknown): string =>
+    typeof v === 'number' ? formatUsd(Math.abs(v)) : '—';
+
+  switch (alertType) {
+    case 'accumulation_wave':
+    case 'distribution_wave': {
+      const inflow  = fmtUsd(data['inflow_usd']);
+      const outflow = fmtUsd(data['outflow_usd']);
+      const net     = fmtUsd(data['net_outflow_usd'] ?? data['net_inflow_usd']);
+      lines.push(`  In:  ${inflow}`);
+      lines.push(`  Out: ${outflow}`);
+      lines.push(`  Net: ${net}`);
+      break;
+    }
+    case 'staking_shift': {
+      const staked   = fmtUsd(data['staked_usd']);
+      const unstaked = fmtUsd(data['unstaked_usd']);
+      const net      = fmtUsd(data['net_staking_usd']);
+      const dir      = typeof data['net_staking_usd'] === 'number' && (data['net_staking_usd'] as number) > 0
+        ? '(net staked 🔒)' : '(net unstaked ⚡)';
+      lines.push(`  Staked:   ${staked}`);
+      lines.push(`  Unstaked: ${unstaked}`);
+      lines.push(`  Net:      ${net} ${dir}`);
+      break;
+    }
+    case 'exchange_spike': {
+      const vol   = fmtUsd(data['current_volume_usd']);
+      const ratio = data['ratio'] ?? '?';
+      lines.push(`  Volume: ${vol} (${ratio}× baseline)`);
+      break;
+    }
+    case 'whale_large_move': {
+      const amt = fmtUsd(data['amount_usd']);
+      lines.push(`  Amount: ${amt}`);
+      break;
+    }
+    default:
+      break;
+  }
+
+  return lines;
+}
+
+// ── Flow alert formatter ──────────────────────────────────────
+
+/**
+ * Format a v2 AlertRow for Telegram delivery.
+ * Used by send-alerts cron for free/premium channel posting.
+ */
+export function formatFlowAlert(alert: AlertRow): string {
+  const severityEmoji = SEVERITY_LABELS[alert.severity] ?? '📊';
+  const typeLabel     = ALERT_TYPE_LABELS[alert.alert_type] ?? esc(alert.alert_type);
+  const ts            = formatRelativeTimestamp(alert.created_at);
+
+  const dataLines = formatDataLines(
+    alert.alert_type,
+    alert.data as Record<string, unknown> | null,
+  );
+
+  const aiLine = alert.ai_analysis
+    ? `\n💡 ${esc(alert.ai_analysis)}`
+    : '';
+
+  const lines = [
+    `${severityEmoji} ${bold(typeLabel)}`,
+    bold(esc(alert.title)),
+    '',
+    esc(alert.body),
+  ];
+
+  if (dataLines.length > 0) {
+    lines.push('');
+    lines.push(...dataLines);
+  }
+
+  if (aiLine) lines.push(aiLine);
+
+  lines.push('');
+  lines.push(`🕐 ${ts}  ·  📡 SONAR`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format an alert for re-rendering from stored AlertRow.
+ * Used by /flow and /report commands.
+ */
+export function formatAlertRow(alert: AlertRow): string {
+  return formatFlowAlert(alert);
+}
+
+// ── Whale movement formatter ──────────────────────────────────
+
+export interface WhaleMovementPayload {
+  fromLabel:   string | null;
+  toLabel:     string | null;
+  token:       string;
+  amountUsd:   number | null;
+  amountToken: number;
+  flowType:    string;
+  exchange:    string | null;
+  protocol:    string | null;
+  signature:   string;
+  blockTime:   string;
+}
+
+export function formatWhaleMovement(m: WhaleMovementPayload): string {
+  const direction =
+    m.flowType === 'exchange_deposit'    ? '🔴 Deposited to exchange' :
+    m.flowType === 'exchange_withdrawal' ? '🟢 Withdrawn from exchange' :
+    m.flowType === 'stake'               ? '🔒 Staked' :
+    m.flowType === 'unstake'             ? '⚡ Unstaked' :
+    m.flowType === 'defi_deposit'        ? '📊 Deposited to DeFi' :
+    m.flowType === 'defi_withdrawal'     ? '📤 Withdrawn from DeFi' :
+    'Moved';
+
+  const amount = m.amountUsd ? bold(formatUsd(m.amountUsd))
+               : `${m.amountToken} ${m.token}`;
+
+  const venue     = m.exchange ?? m.protocol ?? null;
+  const venueLine = venue ? ` (${esc(venue)})` : '';
+  const txLink    = link('View tx', EXTERNAL_URLS.solscanTx(m.signature));
+
+  return [
+    `🐋 ${bold('Whale Large Move')}`,
+    '',
+    `${direction}${venueLine}`,
+    `Amount: ${amount}`,
+    '',
+    txLink,
+  ].join('\n');
+}
+
+// ── Weekly report formatter ───────────────────────────────────
+
+export interface WeeklyReportPayload {
+  netExchangeFlowUsd:  number;
+  netStakingFlowUsd:   number;
+  netDefiFlowUsd:      number;
+  netUsdcFlowUsd:      number;
+  largeMovementsCount: number;
+  marketBias:          string;
+  biasScore:           number;
+  weekLabel:           string;
+}
+
+export function formatWeeklyReport(r: WeeklyReportPayload): string {
+  const biasEmoji   = r.biasScore > 20 ? '🟢' : r.biasScore < -20 ? '🔴' : '⚪';
+  const exchangeDir = r.netExchangeFlowUsd < 0
+    ? 'accumulated (bullish ↓)' : 'sent to exchanges (bearish ↑)';
+  const stakingDir  = r.netStakingFlowUsd > 0 ? 'net staked 🔒' : 'net unstaked ⚡';
+
+  return [
+    `📊 ${bold(`SONAR Smart Money Weekly — ${esc(r.weekLabel)}`)}`,
+    '',
+    `${biasEmoji} ${bold('Bias:')} ${esc(r.marketBias.toUpperCase())} (${r.biasScore > 0 ? '+' : ''}${r.biasScore})`,
+    '',
+    `🏦 ${bold('Exchange Flow:')} ${formatUsd(Math.abs(r.netExchangeFlowUsd))} ${esc(exchangeDir)}`,
+    `⚡ ${bold('Staking:')} ${formatUsd(Math.abs(r.netStakingFlowUsd))} ${esc(stakingDir)}`,
+    `📊 ${bold('DeFi:')} ${formatUsd(Math.abs(r.netDefiFlowUsd))} ${esc(r.netDefiFlowUsd >= 0 ? 'net deposited' : 'net withdrawn')}`,
+    `💵 ${bold('USDC:')} ${formatUsd(Math.abs(r.netUsdcFlowUsd))} ${esc(r.netUsdcFlowUsd >= 0 ? 'inflow' : 'outflow')}`,
+    '',
+    `Large movements: ${r.largeMovementsCount}`,
+    '',
+    '📡 SONAR by NEXUS Finance',
+  ].join('\n');
 }

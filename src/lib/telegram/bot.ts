@@ -50,11 +50,17 @@ export async function sendMessage(opts: SendMessageOptions): Promise<TelegramSen
   };
   if (opts.disableNotification) body.disable_notification = true;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000), // 10s hard timeout
+    });
+  } catch (err) {
+    return { ok: false, error: `Network error: ${String(err)}` };
+  }
 
   const data = await res.json() as { ok: boolean; result?: { message_id: number }; description?: string };
 

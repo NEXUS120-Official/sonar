@@ -1,69 +1,113 @@
 // ============================================================
-// SONAR — Helius Webhook Receiver
+// SONAR v2.0 — Helius Webhook Receiver
 // POST /api/webhook/helius
 // ============================================================
 // Receives enhanced transaction payloads from Helius.
-// Filters to tracked whale wallets, parses SWAPs, persists to DB.
+// Classifies movements (exchange deposit/withdrawal, stake,
+// unstake, DeFi deposit/withdrawal, whale transfer) and
+// persists to the movements table.
 //
 // Security: verifies Authorization header against HELIUS_WEBHOOK_SECRET.
-// Always returns 200 — Helius retries on non-200, which we don't want
-// for bad-auth or parse errors (would create infinite retry loops).
+// Always returns 200 — Helius retries on non-200, creating infinite loops.
+// ============================================================
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { verifyWebhookSecret } from '@/lib/helius/client';
-import type { HeliusEnhancedTransaction } from '@/lib/helius/client';
-import { parseSwapTransaction } from '@/lib/helius/parse-transaction';
-import { CRON_AUTH_HEADER } from '@/lib/utils/constants';
+import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
+import type { MovementRow } from '@/lib/supabase/types';
 
-// ── Header used for Helius webhook authentication ─────────────
-// Helius sends this as the raw value of the "Authorization" header.
-// Set it in the Helius dashboard when creating the webhook.
-// Must match HELIUS_WEBHOOK_SECRET in .env.local.
 const WEBHOOK_AUTH_HEADER = 'authorization';
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── Logging ───────────────────────────────────────────────────
 
 function log(level: 'info' | 'warn' | 'error', msg: string, ctx?: unknown) {
-  const ts = new Date().toISOString();
+  const ts     = new Date().toISOString();
   const prefix = `[webhook/helius][${ts}]`;
   if (level === 'error') console.error(prefix, msg, ctx ?? '');
-  else if (level === 'warn') console.warn(prefix, msg, ctx ?? '');
+  else if (level === 'warn')  console.warn(prefix, msg, ctx ?? '');
   else console.log(prefix, msg, ctx ?? '');
 }
 
-/**
- * Fetch all active whale addresses as a Set for O(1) lookup.
- * Called once per webhook invocation — acceptable for current whale list size.
- */
-async function getActiveWhaleAddresses(): Promise<Map<string, string>> {
-  const db = createAdminClient();
-  const { data, error } = await db
-    .from('whales')
-    .select('id, address')
-    .eq('is_active', true);
+// ── Auth ──────────────────────────────────────────────────────
 
-  if (error) {
-    throw new Error(`[webhook/helius] Failed to fetch whale addresses: ${error.message}`);
-  }
-
-  // Map: address → whale_id
-  return new Map((data ?? []).map((w) => [w.address, w.id]));
+function verifySecret(header: string | null): boolean {
+  const secret = process.env.HELIUS_WEBHOOK_SECRET;
+  if (!secret) return false;
+  return header === secret;
 }
 
-// ── Route handler ─────────────────────────────────────────────
+// ── Fetch active whale address set ────────────────────────────
+
+async function fetchWhaleAddressSet(): Promise<Set<string>> {
+  try {
+    const db = createAdminClient();
+    const { data } = await db
+      .from('whales')
+      .select('address')
+      .eq('is_active', true)
+      .limit(500);
+
+    if (!data) return new Set();
+    return new Set((data as { address: string }[]).map((w) => w.address));
+  } catch {
+    return new Set();
+  }
+}
+
+// ── Persist movements ─────────────────────────────────────────
+
+async function persistMovements(
+  movements: ReturnType<typeof parseMovement>[],
+): Promise<{ inserted: number; skipped: number }> {
+  const valid = movements.filter((m): m is NonNullable<typeof m> => m !== null);
+  if (valid.length === 0) return { inserted: 0, skipped: 0 };
+
+  const db = createAdminClient();
+
+  // Resolve whale_id for each movement where from/to is a tracked whale
+  const whaleAddresses = [...new Set(valid.flatMap((m) => [m.from_address, m.to_address]))];
+  const { data: whales } = await db
+    .from('whales')
+    .select('id, address')
+    .in('address', whaleAddresses);
+
+  const whaleMap = new Map<string, string>(
+    ((whales ?? []) as { id: string; address: string }[]).map((w) => [w.address, w.id]),
+  );
+
+  const rows = valid.map((m) => {
+    const whale_id =
+      whaleMap.get(m.from_address) ?? whaleMap.get(m.to_address) ?? null;
+    return { ...m, whale_id } satisfies Omit<MovementRow, 'id' | 'processed_at' | 'created_at'>;
+  });
+
+  // Upsert on signature to handle Helius retries gracefully
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: inserted, error } = await db
+    .from('movements')
+    .upsert(rows as any, { onConflict: 'signature', ignoreDuplicates: true })
+    .select('id');
+
+  if (error) {
+    log('error', 'Failed to upsert movements', error);
+    return { inserted: 0, skipped: valid.length };
+  }
+
+  return { inserted: (inserted?.length ?? 0), skipped: valid.length - (inserted?.length ?? 0) };
+}
+
+// ── POST handler ──────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // ── 1. Verify webhook secret ───────────────────────────────
+  // ── 1. Auth ────────────────────────────────────────────────
   const authHeader = req.headers.get(WEBHOOK_AUTH_HEADER);
-  if (!verifyWebhookSecret(authHeader)) {
-    log('warn', 'Invalid webhook secret', { authHeader: authHeader?.slice(0, 8) });
-    // Return 200 to prevent Helius infinite retry; the payload is rejected silently.
+  if (!verifySecret(authHeader)) {
+    log('warn', 'Invalid webhook secret');
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 200 });
   }
 
   // ── 2. Parse body ──────────────────────────────────────────
-  let transactions: HeliusEnhancedTransaction[];
+  let transactions: unknown[];
   try {
     const body = await req.json() as unknown;
     transactions = Array.isArray(body) ? body : [body];
@@ -78,76 +122,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   log('info', `Received ${transactions.length} transaction(s)`);
 
-  // ── 3. Load active whale address → id map ─────────────────
-  let whaleMap: Map<string, string>;
-  try {
-    whaleMap = await getActiveWhaleAddresses();
-  } catch (err) {
-    log('error', 'Failed to load whale addresses', err);
-    return NextResponse.json({ ok: false, error: 'db_error' }, { status: 200 });
-  }
+  // ── 3. Load whale address set (for whale_transfer detection) ─
+  const whaleAddresses = await fetchWhaleAddressSet();
 
-  // ── 4. Process each transaction ───────────────────────────
-  const db = createAdminClient();
-  let inserted = 0;
-  let skipped = 0;
-  let errors = 0;
-
-  for (const tx of transactions) {
-    const sig = tx.signature?.slice(0, 16) ?? 'unknown';
-
+  // ── 4. Classify each transaction ──────────────────────────
+  const movements = (transactions as HeliusEnhancedTx[]).map((tx) => {
     try {
-      // Identify the whale: feePayer is the wallet that initiated the swap
-      const whaleAddress = tx.feePayer;
-      const whaleId = whaleMap.get(whaleAddress);
-
-      if (!whaleId) {
-        // Transaction involves a non-tracked wallet — skip silently
-        skipped++;
-        continue;
-      }
-
-      // Parse the SWAP
-      const parsed = parseSwapTransaction(tx, whaleAddress);
-      if (!parsed) {
-        log('info', `sig=${sig} skipped (not a parseable SWAP for ${whaleAddress.slice(0, 8)})`);
-        skipped++;
-        continue;
-      }
-
-      // Insert into transactions table
-      // ON CONFLICT DO NOTHING via ignoreDuplicates — signature is UNIQUE
-      const { error: insertError } = await db.from('transactions').upsert(
-        {
-          whale_id:      whaleId,
-          signature:     parsed.signature,
-          type:          parsed.type,
-          token_address: parsed.tokenAddress,
-          token_symbol:  parsed.tokenSymbol,
-          token_name:    parsed.tokenName,
-          amount_token:  parsed.amountToken,
-          amount_usd:    parsed.amountUsd,
-          price_at_tx:   parsed.priceAtTx,
-          dex:           parsed.dex,
-          block_time:    parsed.blockTime.toISOString(),
-        },
-        { onConflict: 'signature', ignoreDuplicates: true },
-      );
-
-      if (insertError) {
-        log('error', `sig=${sig} insert failed`, insertError.message);
-        errors++;
-      } else {
-        log('info', `sig=${sig} inserted — ${parsed.type} ${parsed.tokenAddress.slice(0, 8)} by ${whaleAddress.slice(0, 8)}`);
-        inserted++;
-      }
+      return parseMovement(tx, whaleAddresses);
     } catch (err) {
-      log('error', `sig=${sig} unhandled error`, err);
-      errors++;
+      log('warn', `Failed to parse tx ${tx?.signature ?? 'unknown'}`, err);
+      return null;
     }
-  }
+  });
 
-  // ── 5. Respond ─────────────────────────────────────────────
-  log('info', `Done — inserted=${inserted} skipped=${skipped} errors=${errors}`);
-  return NextResponse.json({ ok: true, inserted, skipped, errors });
+  const classified = movements.filter((m) => m !== null).length;
+  log('info', `Classified ${classified}/${transactions.length} transactions as movements`);
+
+  // ── 5. Persist ─────────────────────────────────────────────
+  const { inserted, skipped } = await persistMovements(movements);
+  log('info', `Persisted ${inserted} movements (${skipped} skipped/duplicate)`);
+
+  return NextResponse.json({
+    ok:         true,
+    received:   transactions.length,
+    classified,
+    inserted,
+    skipped,
+  });
 }
