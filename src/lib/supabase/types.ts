@@ -1,381 +1,229 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[];
+// ============================================================
+// SONAR v2.0 — Supabase Database Types
+// Auto-maintained — regenerate with: npx supabase gen types typescript
+// ============================================================
 
-export type ChainType = 'solana' | 'ethereum' | 'arbitrum' | 'base';
-export type WhaleSector = 'memecoin' | 'defi' | 'nft' | 'mixed';
-export type TransactionType = 'buy' | 'sell' | 'transfer';
-export type AlertType = 'single' | 'consensus' | 'early_discovery';
-export type ConsensusLabel = 'emerging' | 'strong' | 'ultra';
-export type SafetyLevel = 'safe' | 'caution' | 'danger';
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
+// ── Enum-like string unions ───────────────────────────────────
+
+export type FlowType =
+  | 'exchange_deposit'
+  | 'exchange_withdrawal'
+  | 'stake'
+  | 'unstake'
+  | 'defi_deposit'
+  | 'defi_withdrawal'
+  | 'bridge_in'
+  | 'bridge_out'
+  | 'whale_transfer'
+  | 'unknown';
+
+export type FlowDirection = 'inflow' | 'outflow' | 'internal';
+
+export type MarketBias = 'bullish' | 'bearish' | 'neutral';
+
+export type AlertType =
+  | 'exchange_spike'
+  | 'accumulation_wave'
+  | 'distribution_wave'
+  | 'staking_shift'
+  | 'defi_rotation'
+  | 'stablecoin_flow'
+  | 'whale_large_move'
+  | 'weekly_report';
+
+export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
+
+export type WhaleType = 'accumulator' | 'distributor' | 'staker' | 'defi_user' | 'unknown';
+
+export type WhaleDiscoveryMethod =
+  | 'balance_scan'
+  | 'exchange_withdrawal'
+  | 'gmgn_feed'
+  | 'manual';
+
+export type KnownAddressCategory = 'exchange' | 'staking' | 'defi' | 'bridge' | 'protocol';
+
 export type UserTier = 'free' | 'pro';
-export type DexType = 'jupiter' | 'raydium' | 'orca' | 'uniswap' | 'unknown';
 
-// Supabase GenericTable requires a Relationships array on each table.
-// We have no FK relationships that need client-side join types, so all are empty.
-type NoRelationships = [];
+// ── Table row types ───────────────────────────────────────────
+
+export interface KnownAddressRow {
+  id: string;
+  address: string;
+  label: string;
+  category: KnownAddressCategory;
+  sub_category: string | null;
+  chain: string;
+  is_active: boolean;
+  metadata: Json | null;
+  created_at: string;
+}
+
+export interface WhaleRow {
+  id: string;
+  address: string;
+  label: string | null;
+  chain: string;
+  is_active: boolean;
+  sol_balance: number | null;
+  usdc_balance: number | null;
+  total_value_usd: number | null;
+  staked_sol: number | null;
+  staked_msol: number | null;
+  staked_jitosol: number | null;
+  whale_type: WhaleType | null;
+  discovery_method: WhaleDiscoveryMethod | null;
+  discovered_at: string;
+  balance_updated_at: string | null;
+  created_at: string;
+}
+
+export interface MovementRow {
+  id: string;
+  signature: string;
+  from_address: string;
+  to_address: string;
+  from_label: string | null;
+  to_label: string | null;
+  whale_id: string | null;
+  token: string;
+  amount_token: number;
+  amount_usd: number | null;
+  flow_type: FlowType;
+  flow_direction: FlowDirection;
+  exchange: string | null;
+  protocol: string | null;
+  block_time: string;
+  processed_at: string;
+  created_at: string;
+}
+
+export interface FlowSnapshotRow {
+  id: string;
+  snapshot_time: string;
+  window_hours: number;
+  sol_exchange_inflow_usd: number;
+  sol_exchange_outflow_usd: number;
+  sol_net_exchange_flow_usd: number;
+  sol_staked_usd: number;
+  sol_unstaked_usd: number;
+  net_staking_flow_usd: number;
+  usdc_inflow_usd: number;
+  usdc_outflow_usd: number;
+  net_usdc_flow_usd: number;
+  defi_deposit_usd: number;
+  defi_withdrawal_usd: number;
+  net_defi_flow_usd: number;
+  large_movements_count: number;
+  unique_whales_active: number;
+  market_bias: MarketBias | null;
+  bias_score: number | null;
+  created_at: string;
+}
+
+export interface AlertRow {
+  id: string;
+  alert_type: AlertType;
+  severity: AlertSeverity;
+  title: string;
+  body: string;
+  ai_analysis: string | null;
+  data: Json | null;
+  movement_ids: string[] | null;
+  sent_telegram_free: boolean;
+  sent_telegram_premium: boolean;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface GmgnSmartMoneyCacheRow {
+  id: string;
+  wallet_address: string;
+  token_address: string | null;
+  action: string | null;
+  amount_usd: number | null;
+  source: string | null;
+  is_pump_fun: boolean;
+  gmgn_fetched_at: string;
+  created_at: string;
+}
+
+export interface UserProfileRow {
+  id: string;
+  telegram_chat_id: string | null;
+  telegram_username: string | null;
+  alert_min_severity: AlertSeverity;
+  alert_types: AlertType[];
+  tier: UserTier;
+  stripe_customer_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Supabase Database definition ─────────────────────────────
 
 export interface Database {
   public: {
     Tables: {
+      known_addresses: {
+        Row: KnownAddressRow;
+        Insert: Omit<KnownAddressRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<KnownAddressRow, 'id'>>;
+      };
       whales: {
-        Row: {
-          id: string;
-          address: string;
-          label: string | null;
-          chain: ChainType;
-          is_active: boolean;
-          win_rate_7d: number | null;
-          win_rate_30d: number | null;
-          pnl_7d: number | null;
-          pnl_30d: number | null;
-          total_trades_7d: number;
-          total_trades_30d: number;
-          avg_hold_time_hours: number | null;
-          best_trade_pnl: number | null;
-          worst_trade_pnl: number | null;
-          preferred_sector: WhaleSector | null;
-          discovered_at: string;
-          stats_updated_at: string | null;
-          created_at: string;
-        };
-        Insert: {
-          address: string;
+        Row: WhaleRow;
+        Insert: Omit<WhaleRow, 'id' | 'discovered_at' | 'created_at'> & {
           id?: string;
-          label?: string | null;
-          chain?: ChainType;
-          is_active?: boolean;
-          win_rate_7d?: number | null;
-          win_rate_30d?: number | null;
-          pnl_7d?: number | null;
-          pnl_30d?: number | null;
-          total_trades_7d?: number;
-          total_trades_30d?: number;
-          avg_hold_time_hours?: number | null;
-          best_trade_pnl?: number | null;
-          worst_trade_pnl?: number | null;
-          preferred_sector?: WhaleSector | null;
           discovered_at?: string;
-          stats_updated_at?: string | null;
           created_at?: string;
         };
-        Update: Partial<Database['public']['Tables']['whales']['Insert']>;
-        Relationships: NoRelationships;
+        Update: Partial<Omit<WhaleRow, 'id'>>;
       };
-      transactions: {
-        Row: {
-          id: string;
-          whale_id: string;
-          signature: string;
-          type: TransactionType;
-          token_address: string;
-          token_symbol: string | null;
-          token_name: string | null;
-          amount_token: number | null;
-          amount_usd: number | null;
-          price_at_tx: number | null;
-          dex: DexType | null;
-          block_time: string;
-          processed_at: string;
-          created_at: string;
-        };
-        Insert: {
-          whale_id: string;
-          signature: string;
-          type: TransactionType;
-          token_address: string;
-          block_time: string;
+      movements: {
+        Row: MovementRow;
+        Insert: Omit<MovementRow, 'id' | 'processed_at' | 'created_at'> & {
           id?: string;
-          token_symbol?: string | null;
-          token_name?: string | null;
-          amount_token?: number | null;
-          amount_usd?: number | null;
-          price_at_tx?: number | null;
-          dex?: DexType | null;
           processed_at?: string;
           created_at?: string;
         };
-        Update: Partial<Database['public']['Tables']['transactions']['Insert']>;
-        Relationships: NoRelationships;
+        Update: Partial<Omit<MovementRow, 'id'>>;
+      };
+      flow_snapshots: {
+        Row: FlowSnapshotRow;
+        Insert: Omit<FlowSnapshotRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<FlowSnapshotRow, 'id'>>;
       };
       alerts: {
-        Row: {
-          id: string;
-          type: AlertType;
-          consensus_level: number;
-          consensus_label: ConsensusLabel | null;
-          token_address: string;
-          token_symbol: string | null;
-          token_name: string | null;
-          token_market_cap: number | null;
-          token_age_hours: number | null;
-          token_holders: number | null;
-          safety_score: number | null;
-          safety_level: SafetyLevel | null;
-          total_whale_volume_usd: number | null;
-          whale_transactions: Json | null;
-          alert_text: string | null;
-          jupiter_swap_url: string | null;
-          birdeye_url: string | null;
-          sent_telegram: boolean;
-          sent_at: string | null;
-          created_at: string;
-        };
-        Insert: {
-          type: AlertType;
-          token_address: string;
-          id?: string;
-          consensus_level?: number;
-          consensus_label?: ConsensusLabel | null;
-          token_symbol?: string | null;
-          token_name?: string | null;
-          token_market_cap?: number | null;
-          token_age_hours?: number | null;
-          token_holders?: number | null;
-          safety_score?: number | null;
-          safety_level?: SafetyLevel | null;
-          total_whale_volume_usd?: number | null;
-          whale_transactions?: Json | null;
-          alert_text?: string | null;
-          jupiter_swap_url?: string | null;
-          birdeye_url?: string | null;
-          sent_telegram?: boolean;
-          sent_at?: string | null;
-          created_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['alerts']['Insert']>;
-        Relationships: NoRelationships;
+        Row: AlertRow;
+        Insert: Omit<AlertRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<AlertRow, 'id'>>;
       };
-      token_safety: {
-        Row: {
-          token_address: string;
-          liquidity_locked: boolean | null;
-          liquidity_lock_duration_days: number | null;
-          owner_renounced: boolean | null;
-          mint_authority_revoked: boolean | null;
-          top10_holder_pct: number | null;
-          holder_count: number | null;
-          is_honeypot: boolean | null;
-          token_age_hours: number | null;
-          safety_score: number;
-          safety_level: SafetyLevel;
-          checked_at: string;
-          created_at: string;
-        };
-        Insert: {
-          token_address: string;
-          safety_score: number;
-          safety_level: SafetyLevel;
-          liquidity_locked?: boolean | null;
-          liquidity_lock_duration_days?: number | null;
-          owner_renounced?: boolean | null;
-          mint_authority_revoked?: boolean | null;
-          top10_holder_pct?: number | null;
-          holder_count?: number | null;
-          is_honeypot?: boolean | null;
-          token_age_hours?: number | null;
-          checked_at?: string;
+      gmgn_smart_money_cache: {
+        Row: GmgnSmartMoneyCacheRow;
+        Insert: Omit<GmgnSmartMoneyCacheRow, 'id' | 'gmgn_fetched_at' | 'created_at'> & {
+          id?: string;
+          gmgn_fetched_at?: string;
           created_at?: string;
         };
-        Update: Partial<Database['public']['Tables']['token_safety']['Insert']>;
-        Relationships: NoRelationships;
+        Update: Partial<Omit<GmgnSmartMoneyCacheRow, 'id'>>;
       };
       user_profiles: {
-        Row: {
-          id: string;
-          telegram_chat_id: string | null;
-          telegram_username: string | null;
-          alert_min_consensus: number;
-          alert_min_safety: number;
-          alert_min_volume_usd: number | null;
-          alert_types: string[];
-          tier: UserTier;
-          stripe_customer_id: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id: string;
-          telegram_chat_id?: string | null;
-          telegram_username?: string | null;
-          alert_min_consensus?: number;
-          alert_min_safety?: number;
-          alert_min_volume_usd?: number | null;
-          alert_types?: string[];
-          tier?: UserTier;
-          stripe_customer_id?: string | null;
+        Row: UserProfileRow;
+        Insert: Omit<UserProfileRow, 'created_at' | 'updated_at'> & {
           created_at?: string;
           updated_at?: string;
         };
-        Update: Partial<Database['public']['Tables']['user_profiles']['Insert']>;
-        Relationships: NoRelationships;
-      };
-      user_whale_watchlist: {
-        Row: {
-          id: string;
-          user_id: string;
-          whale_id: string;
-          added_at: string;
-        };
-        Insert: {
-          user_id: string;
-          whale_id: string;
-          id?: string;
-          added_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['user_whale_watchlist']['Insert']>;
-        Relationships: NoRelationships;
-      };
-      discovery_candidates: {
-        Row: {
-          id: string;
-          address: string;
-          chain: string;
-          win_rate_30d: number | null;
-          trade_count_30d: number | null;
-          last_active_at: string | null;
-          token_diversity_30d: number | null;
-          avg_trade_size_usd: number | null;
-          total_volume_30d: number | null;
-          instant_sell_pct: number | null;
-          is_bot_flagged: boolean;
-          is_rug_flagged: boolean;
-          is_insider_flagged: boolean;
-          discovery_score: number;
-          status: DiscoveryStatus;
-          primary_source: string;
-          submitted_by: string | null;
-          notes: string | null;
-          evaluated_at: string | null;
-          reviewed_at: string | null;
-          reviewed_by: string | null;
-          promoted_at: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          address: string;
-          id?: string;
-          chain?: string;
-          win_rate_30d?: number | null;
-          trade_count_30d?: number | null;
-          last_active_at?: string | null;
-          token_diversity_30d?: number | null;
-          avg_trade_size_usd?: number | null;
-          total_volume_30d?: number | null;
-          instant_sell_pct?: number | null;
-          is_bot_flagged?: boolean;
-          is_rug_flagged?: boolean;
-          is_insider_flagged?: boolean;
-          discovery_score?: number;
-          status?: DiscoveryStatus;
-          primary_source?: string;
-          submitted_by?: string | null;
-          notes?: string | null;
-          evaluated_at?: string | null;
-          reviewed_at?: string | null;
-          reviewed_by?: string | null;
-          promoted_at?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['discovery_candidates']['Insert']>;
-        Relationships: NoRelationships;
-      };
-      discovery_candidate_sources: {
-        Row: {
-          id: string;
-          candidate_id: string;
-          source: string;
-          source_data: Json | null;
-          fetched_at: string;
-        };
-        Insert: {
-          candidate_id: string;
-          source: string;
-          id?: string;
-          source_data?: Json | null;
-          fetched_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['discovery_candidate_sources']['Insert']>;
-        Relationships: NoRelationships;
-      };
-      discovery_reviews: {
-        Row: {
-          id: string;
-          candidate_id: string;
-          reviewer: string;
-          action: string;
-          notes: string | null;
-          created_at: string;
-        };
-        Insert: {
-          candidate_id: string;
-          action: string;
-          id?: string;
-          reviewer?: string;
-          notes?: string | null;
-          created_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['discovery_reviews']['Insert']>;
-        Relationships: NoRelationships;
-      };
-      scout_submissions: {
-        Row: {
-          id: string;
-          address: string;
-          chain: string;
-          submitted_by: string;
-          telegram_username: string | null;
-          message_id: number | null;
-          precheck_passed: boolean | null;
-          precheck_notes: string | null;
-          candidate_id: string | null;
-          created_at: string;
-        };
-        Insert: {
-          address: string;
-          submitted_by: string;
-          id?: string;
-          chain?: string;
-          telegram_username?: string | null;
-          message_id?: number | null;
-          precheck_passed?: boolean | null;
-          precheck_notes?: string | null;
-          candidate_id?: string | null;
-          created_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['scout_submissions']['Insert']>;
-        Relationships: NoRelationships;
+        Update: Partial<Omit<UserProfileRow, 'id'>>;
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      known_address_map: {
+        Row: Pick<KnownAddressRow, 'address' | 'label' | 'category' | 'sub_category'>;
+      };
+    };
     Functions: Record<string, never>;
     Enums: Record<string, never>;
-    CompositeTypes: Record<string, never>;
   };
 }
-
-// Convenience row types
-export type Whale = Database['public']['Tables']['whales']['Row'];
-export type Transaction = Database['public']['Tables']['transactions']['Row'];
-export type Alert = Database['public']['Tables']['alerts']['Row'];
-export type TokenSafety = Database['public']['Tables']['token_safety']['Row'];
-export type UserProfile = Database['public']['Tables']['user_profiles']['Row'];
-export type UserWhaleWatchlist = Database['public']['Tables']['user_whale_watchlist']['Row'];
-export type DiscoveryCandidate = Database['public']['Tables']['discovery_candidates']['Row'];
-export type DiscoveryCandidateSource = Database['public']['Tables']['discovery_candidate_sources']['Row'];
-export type DiscoveryReview = Database['public']['Tables']['discovery_reviews']['Row'];
-export type ScoutSubmission = Database['public']['Tables']['scout_submissions']['Row'];
-
-export type DiscoveryStatus =
-  | 'pending'
-  | 'auto_reject'
-  | 'manual_review'
-  | 'auto_approve'
-  | 'promoted'
-  | 'rejected';
