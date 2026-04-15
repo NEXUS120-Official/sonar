@@ -153,6 +153,28 @@ export interface BiasIndexHistoryRow {
   created_at: string;
 }
 
+export type TokenMovementAction = 'buy' | 'sell' | 'add_liquidity' | 'remove_liquidity';
+
+export interface TokenMovementRow {
+  id:              string;
+  movement_id:     string | null;
+  whale_id:        string | null;
+  signature:       string;
+  block_time:      string;
+  token_mint:      string;
+  token_symbol:    string | null;
+  token_name:      string | null;
+  action:          TokenMovementAction;
+  amount_token:    number | null;
+  amount_sol:      number | null;
+  amount_usd:      number | null;
+  price_per_token: number | null;
+  protocol:        string | null;
+  pool_address:    string | null;
+  is_new_token:    boolean;
+  created_at:      string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -219,6 +241,11 @@ export interface Database {
         Row: BiasIndexHistoryRow;
         Insert: Omit<BiasIndexHistoryRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
         Update: Partial<Omit<BiasIndexHistoryRow, 'id'>>;
+      };
+      token_movements: {
+        Row: TokenMovementRow;
+        Insert: Omit<TokenMovementRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<TokenMovementRow, 'id'>>;
       };
       gmgn_smart_money_cache: {
         Row: GmgnSmartMoneyCacheRow;

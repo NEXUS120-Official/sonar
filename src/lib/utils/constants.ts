@@ -89,15 +89,29 @@ export const KNOWN_DEFI_ADDRESSES: ReadonlyArray<{
   sub_category: string;
 }> = [
   // ── Raydium ───────────────────────────────────────────────────
-  { address: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', label: 'Raydium AMM',           sub_category: 'raydium' },
+  { address: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', label: 'Raydium AMM v4',        sub_category: 'raydium_v4' },
+  // Raydium Authority v4 — signs AMM v4 transactions
+  { address: '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', label: 'Raydium Authority v4',  sub_category: 'raydium_v4' },
   // Raydium CLMM (Concentrated Liquidity) — verified via raydium.io/clmm docs
   { address: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', label: 'Raydium CLMM',          sub_category: 'raydium' },
   // ── Orca ──────────────────────────────────────────────────────
-  { address: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', label: 'Orca Whirlpool',        sub_category: 'orca' },
+  { address: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', label: 'Orca Whirlpool',        sub_category: 'orca_whirlpool' },
+  { address: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', label: 'Orca Token Swap v2',    sub_category: 'orca' },
+  // ── Meteora ───────────────────────────────────────────────────
+  { address: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',  label: 'Meteora DLMM',          sub_category: 'meteora_dlmm' },
+  { address: 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EkAW7vP8',  label: 'Meteora Pools',         sub_category: 'meteora' },
+  // ── Phoenix ───────────────────────────────────────────────────
+  // Orderbook DEX on Solana
+  { address: 'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',  label: 'Phoenix Orderbook',     sub_category: 'phoenix' },
+  // ── Pump.fun ──────────────────────────────────────────────────
+  { address: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  label: 'Pump.fun Program',      sub_category: 'pumpfun' },
+  { address: 'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', label: 'Pump.fun Fee Account',  sub_category: 'pumpfun' },
   // ── Jupiter ───────────────────────────────────────────────────
   { address: 'voTpe3tHQ7AjQHMapgSue2HJFAh2cGsdokqN3XqmVSj', label: 'Jupiter Vote',          sub_category: 'jupiter' },
   // Jupiter v6 Aggregator — current routing program (replacing v4)
   { address: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', label: 'Jupiter v6 Aggregator', sub_category: 'jupiter' },
+  // Jupiter v4 — legacy routing program still used by some integrations
+  { address: 'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB',  label: 'Jupiter v4',            sub_category: 'jupiter' },
   // ── Marginfi ──────────────────────────────────────────────────
   { address: 'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', label: 'Marginfi Lending',      sub_category: 'marginfi' },
   // ── Drift ─────────────────────────────────────────────────────
@@ -237,9 +251,9 @@ export const WEBHOOK_CONFIG = {
   max_exchange_addresses: 20,  // 16 live
   max_whale_addresses:    55,  // raised from 50 → 55 (R8 import: 53 active after adding 3)
   max_staking_addresses:  10,  // 5 live
-  max_defi_addresses:     15,  // 9 live (Raydium x2, Orca, Jupiter x2, Marginfi, Drift, Kamino, Solend)
+  max_defi_addresses:     25,  // 19 live (Raydium x3, Orca x2, Meteora x2, Phoenix, Pumpfun x2, Jupiter x3, Marginfi, Drift, Kamino, Solend)
   max_bridge_addresses:    5,  // 2 live (Wormhole x2)
-  total_budget:          150,  // 16 exch + 5 staking + 9 defi + 2 bridge + 55 whales = 87 used (cap); 63 headroom
+  total_budget:          150,  // 16 exch + 5 staking + 19 defi + 2 bridge + 55 whales = 97 used; 53 headroom
 } as const;
 
 // ── GMGN API ──────────────────────────────────────────────────

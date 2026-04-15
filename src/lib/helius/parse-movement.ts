@@ -13,7 +13,7 @@
 //   else                 → null (skip)
 // ============================================================
 
-import { lookupAddress } from '@/lib/helius/known-addresses';
+import { lookupAddress, getKnownAddressMap } from '@/lib/helius/known-addresses';
 import { FLOW_THRESHOLDS, SOL_NATIVE_MINT, USDC_MINT, USDT_MINT } from '@/lib/utils/constants';
 import { SOL_PRICE_FALLBACK_USD } from '@/lib/helius/sol-price-cache';
 import type { FlowType, FlowDirection } from '@/lib/supabase/types';
@@ -174,6 +174,76 @@ export function parseMovement(
       blockTime,
       knownWhaleAddresses,
     });
+  }
+
+  // ── 3. SWAP / DEX fallback ─────────────────────────────────
+  // For SWAP-type transactions where there is no dominant native SOL
+  // transfer (e.g. the SOL goes to a pool account, not directly to
+  // a known DEX program address), use feePayer + source to classify.
+  // This ensures pump.fun and aggregator swaps are captured even when
+  // the SOL transfer is split across many pool accounts.
+  if (tx.type === 'SWAP' || tx.type === 'ADD_LIQUIDITY' || tx.type === 'REMOVE_LIQUIDITY') {
+    const feePayer    = tx.feePayer;
+    const sourceUpper = (tx.source ?? '').toUpperCase();
+
+    // Map Helius source field to a known-address lookup key
+    const sourceToAddress: Record<string, string> = {
+      'RAYDIUM':        '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+      'ORCA':           'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',
+      'METEORA':        'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+      'PHOENIX':        'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',
+      'PUMP_FUN':       '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+      'PUMPFUN':        '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+      'JUPITER':        'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+    };
+
+    // Try to match source to a known DEX address
+    const knownAddrMap = getKnownAddressMap();
+    let dexAddress: string | null = null;
+
+    // 1. Try direct source-field mapping
+    const mappedAddr = sourceToAddress[sourceUpper];
+    if (mappedAddr && knownAddrMap.has(mappedAddr)) {
+      dexAddress = mappedAddr;
+    }
+
+    // 2. Fallback: look for any known-defi address in nativeTransfers
+    if (!dexAddress) {
+      for (const nt of tx.nativeTransfers ?? []) {
+        if (knownAddrMap.get(nt.toUserAccount)?.category === 'defi') {
+          dexAddress = nt.toUserAccount;
+          break;
+        }
+        if (knownAddrMap.get(nt.fromUserAccount)?.category === 'defi') {
+          dexAddress = nt.fromUserAccount;
+          break;
+        }
+      }
+    }
+
+    if (dexAddress && feePayer && (knownWhaleAddresses?.has(feePayer) ?? false)) {
+      // Sum all native SOL transfers involving feePayer to estimate swap size
+      const totalLamports = (tx.nativeTransfers ?? [])
+        .filter((nt) => nt.fromUserAccount === feePayer)
+        .reduce((sum, nt) => sum + nt.amount, 0);
+
+      const solAmt    = lamportsToSol(Math.max(totalLamports, tx.fee ?? 0));
+      const amountUsd = solAmt * solPriceUsd;
+
+      // Only record if above threshold
+      if (amountUsd >= FLOW_THRESHOLDS.min_movement_usd) {
+        return classifyTransfer({
+          signature: tx.signature,
+          from:      feePayer,
+          to:        dexAddress,
+          token:     'SOL',
+          amount:    solAmt,
+          amountUsd,
+          blockTime,
+          knownWhaleAddresses,
+        });
+      }
+    }
   }
 
   return null;

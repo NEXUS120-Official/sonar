@@ -14,8 +14,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient }               from '@/lib/supabase/server';
 import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
+import { parseTokenMovement, type ParsedTokenMovement } from '@/lib/helius/parse-token-movement';
 import { getCachedSolPrice }               from '@/lib/helius/sol-price-cache';
-import type { MovementRow }                from '@/lib/supabase/types';
+import type { MovementRow, TokenMovementRow } from '@/lib/supabase/types';
 
 const WEBHOOK_AUTH_HEADER = 'authorization';
 
@@ -97,6 +98,43 @@ async function persistMovements(
   return { inserted: (inserted?.length ?? 0), skipped: valid.length - (inserted?.length ?? 0) };
 }
 
+// ── Persist token movements ───────────────────────────────────
+
+async function persistTokenMovements(
+  tokenMovements: (ParsedTokenMovement | null)[],
+  signatureToMovementId: Map<string, string>,
+  whaleAddressToId: Map<string, string>,
+): Promise<{ inserted: number; skipped: number }> {
+  const valid = tokenMovements.filter((m): m is ParsedTokenMovement => m !== null);
+  if (valid.length === 0) return { inserted: 0, skipped: 0 };
+
+  const db = createAdminClient();
+
+  const rows = valid.map((m) => {
+    const movement_id = signatureToMovementId.get(m.signature) ?? null;
+    const whale_id    = whaleAddressToId.get(m.signature)      ?? null;
+    return {
+      ...m,
+      movement_id,
+      whale_id,
+    } satisfies Omit<TokenMovementRow, 'id' | 'created_at'>;
+  });
+
+  // Upsert on signature — same dedup pattern as movements
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: inserted, error } = await (db as any)
+    .from('token_movements')
+    .upsert(rows, { onConflict: 'signature', ignoreDuplicates: true })
+    .select('id');
+
+  if (error) {
+    log('error', 'Failed to upsert token_movements', error);
+    return { inserted: 0, skipped: valid.length };
+  }
+
+  return { inserted: (inserted?.length ?? 0), skipped: valid.length - (inserted?.length ?? 0) };
+}
+
 // ── POST handler ──────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -131,7 +169,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   log('info', `SOL price: $${solPriceUsd.toFixed(2)}`);
 
   // ── 4. Classify each transaction ──────────────────────────
-  const movements = (transactions as HeliusEnhancedTx[]).map((tx) => {
+  const txList = transactions as HeliusEnhancedTx[];
+
+  const movements = txList.map((tx) => {
     try {
       return parseMovement(tx, whaleAddresses, solPriceUsd);
     } catch (err) {
@@ -140,18 +180,63 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   });
 
-  const classified = movements.filter((m) => m !== null).length;
-  log('info', `Classified ${classified}/${transactions.length} transactions as movements`);
+  const tokenMovements = txList.map((tx) => {
+    try {
+      return parseTokenMovement(tx, whaleAddresses, solPriceUsd);
+    } catch (err) {
+      log('warn', `Failed to parse token movement for tx ${tx?.signature ?? 'unknown'}`, err);
+      return null;
+    }
+  });
 
-  // ── 5. Persist ─────────────────────────────────────────────
+  const classified = movements.filter((m) => m !== null).length;
+  const tokenClassified = tokenMovements.filter((m) => m !== null).length;
+  log('info', `Classified ${classified}/${transactions.length} movements, ${tokenClassified} token movements`);
+
+  // ── 5. Persist movements ───────────────────────────────────
   const { inserted, skipped } = await persistMovements(movements);
   log('info', `Persisted ${inserted} movements (${skipped} skipped/duplicate)`);
 
+  // ── 6. Persist token movements ─────────────────────────────
+  // Build a signature→movement_id map from persisted movements
+  let tokenInserted = 0;
+  let tokenSkipped  = 0;
+
+  if (tokenClassified > 0) {
+    // Fetch movement IDs for the signatures we just upserted
+    const sigs = txList
+      .map((tx) => tx.signature)
+      .filter((s) => !!s);
+
+    const db = createAdminClient();
+    const { data: movRows } = await db
+      .from('movements')
+      .select('id, signature, from_address, to_address, whale_id')
+      .in('signature', sigs);
+
+    const sigToMovId    = new Map<string, string>();
+    const sigToWhaleId  = new Map<string, string>();
+
+    for (const row of movRows ?? []) {
+      const r = row as { id: string; signature: string; whale_id: string | null };
+      sigToMovId.set(r.signature, r.id);
+      if (r.whale_id) sigToWhaleId.set(r.signature, r.whale_id);
+    }
+
+    const result = await persistTokenMovements(tokenMovements, sigToMovId, sigToWhaleId);
+    tokenInserted = result.inserted;
+    tokenSkipped  = result.skipped;
+    log('info', `Persisted ${tokenInserted} token_movements (${tokenSkipped} skipped/duplicate)`);
+  }
+
   return NextResponse.json({
-    ok:         true,
-    received:   transactions.length,
+    ok:              true,
+    received:        transactions.length,
     classified,
     inserted,
     skipped,
+    token_classified: tokenClassified,
+    token_inserted:   tokenInserted,
+    token_skipped:    tokenSkipped,
   });
 }
