@@ -21,8 +21,8 @@
       "schedule": "0 0 * * 1"
     },
     {
-      "path": "/api/cron/resolve-signal-outcomes",
-      "schedule": "*/5 * * * *"
+      "path": "/api/cron/resolve-outcomes",
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/update-whale-stats",

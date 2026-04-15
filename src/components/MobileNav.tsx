@@ -15,6 +15,7 @@ const NAV = [
   { href: '/dashboard/exchange-flow',      label: 'Exchange Flow',   icon: '⇄' },
   { href: '/dashboard/staking-flow',       label: 'Staking',         icon: '◎' },
   { href: '/dashboard/whales',             label: 'Whales',          icon: '🐋' },
+  { href: '/dashboard/tokens',             label: 'Tokens',          icon: '◈' },
   { href: '/dashboard/intel',              label: 'Intel',           icon: '◉' },
   { href: '/dashboard/dex-intelligence',   label: 'DEX Intel',       icon: '⬡' },
   { href: '/dashboard/pumpfun-radar',      label: 'Pump.fun Radar',  icon: '◎' },
