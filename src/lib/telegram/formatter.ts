@@ -225,3 +225,51 @@ export function formatWeeklyReport(r: WeeklyReportPayload): string {
     '📡 SONAR by NEXUS Finance',
   ].join('\n');
 }
+
+// ── Exchange flow breakdown formatter ─────────────────────────
+
+export interface ExchangeBreakdownItem {
+  exchange:       string;
+  net_usd:        number;   // positive = accumulation
+  inflow_usd:     number;
+  outflow_usd:    number;
+  interpretation: string;
+  trend?: { net_change_pct: number | null };
+}
+
+export function formatExchangeBreakdown(items: ExchangeBreakdownItem[]): string {
+  const fmtNet = (v: number): string => {
+    const abs  = Math.abs(v);
+    const sign = v >= 0 ? '+' : '-';
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000)     return `${sign}$${Math.round(abs / 1_000)}K`;
+    return `${sign}$${Math.round(abs)}`;
+  };
+
+  const totalNet = items.reduce((s, i) => s + i.net_usd, 0);
+  const overall  = totalNet > 50_000  ? 'smart money accumulating 🟢'
+                 : totalNet < -50_000 ? 'smart money distributing 🔴'
+                 : 'balanced ⚪';
+
+  const lines: string[] = [
+    `🏦 <b>Exchange Flow Breakdown (24h)</b>`,
+    '',
+  ];
+
+  for (const item of items.slice(0, 6)) {
+    const ex    = esc(item.exchange.charAt(0).toUpperCase() + item.exchange.slice(1));
+    const net   = fmtNet(item.net_usd);
+    const dir   = item.interpretation;
+    const trend = item.trend?.net_change_pct !== null && item.trend?.net_change_pct !== undefined
+      ? ` ${item.trend.net_change_pct > 0 ? '↑' : '↓'}${Math.abs(item.trend.net_change_pct)}% vs prior`
+      : '';
+    lines.push(`${ex.padEnd(10)} ${net.padStart(10)} (${dir})${trend}`);
+  }
+
+  lines.push('');
+  lines.push(`Net: ${fmtNet(totalNet)} — ${overall}`);
+  lines.push('');
+  lines.push('📡 SONAR by NEXUS Finance');
+
+  return lines.join('\n');
+}

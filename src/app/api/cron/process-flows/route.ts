@@ -24,6 +24,7 @@ import {
   type SnapshotInsert,
   type SnapshotWindow,
 } from '@/lib/flow-engine/aggregator';
+import { calculateBiasIndex } from '@/lib/flow-engine/bias-index';
 import { detectAnomalies, type AlertInsert } from '@/lib/flow-engine/anomaly-detector';
 import { type RecentAlertMap }               from '@/lib/flow-engine/dedup';
 import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
@@ -196,6 +197,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } else {
       snapshots_written = inserted?.length ?? 0;
       log('info', `${snapshots_written} snapshot(s) written`);
+    }
+  }
+
+  // ── 4b. Save Bias Index History (4h window) ────────────────
+  if (snapshot4h) {
+    try {
+      const biasResult = calculateBiasIndex({
+        sol_net_exchange_flow_usd: snapshot4h.sol_net_exchange_flow_usd,
+        net_staking_flow_usd:      snapshot4h.net_staking_flow_usd,
+        net_usdc_flow_usd:         snapshot4h.net_usdc_flow_usd,
+        net_defi_flow_usd:         snapshot4h.net_defi_flow_usd,
+      });
+      await db.from('bias_index_history').insert({
+        score:      biasResult.score,
+        bias:       biasResult.bias,
+        components: biasResult.components as any,
+        confidence: biasResult.confidence,
+      } as any);
+      log('info', `Bias index saved: ${biasResult.score} (${biasResult.bias})`);
+    } catch (err) {
+      log('warn', `Bias index history save failed: ${String(err)}`);
     }
   }
 
