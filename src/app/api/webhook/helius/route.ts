@@ -16,6 +16,7 @@ import { createAdminClient }               from '@/lib/supabase/server';
 import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 import { parseTokenMovement, type ParsedTokenMovement } from '@/lib/helius/parse-token-movement';
 import { getCachedSolPrice }               from '@/lib/helius/sol-price-cache';
+import { resolveTokenMetadataBatch }       from '@/lib/helius/token-metadata';
 import { sendMessage }                     from '@/lib/telegram/bot';
 import { formatFlowAlert }                 from '@/lib/telegram/formatter';
 import type { MovementRow, TokenMovementRow, AlertRow } from '@/lib/supabase/types';
@@ -373,6 +374,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     tokenInserted = result.inserted;
     tokenSkipped  = result.skipped;
     log('info', `Persisted ${tokenInserted} token_movements (${tokenSkipped} skipped/duplicate)`);
+
+    // ── 6b. Enrich token_movements with symbol/name (fire-and-forget) ─
+    // Collect unique mints from new movements; resolve metadata and back-fill.
+    if (tokenInserted > 0) {
+      const newMints = [...new Set(
+        tokenMovements
+          .filter((m): m is ParsedTokenMovement => m !== null)
+          .map(m => m.token_mint),
+      )];
+
+      resolveTokenMetadataBatch(newMints)
+        .then(async (metaMap) => {
+          const db2 = createAdminClient();
+          for (const [mint, meta] of metaMap) {
+            if (!meta.symbol && !meta.name) continue;
+            // Update token_movements rows that have null symbol for this mint
+            await (db2 as any)
+              .from('token_movements')
+              .update({ token_symbol: meta.symbol, token_name: meta.name })
+              .eq('token_mint', mint)
+              .is('token_symbol', null);
+          }
+        })
+        .catch((err) => log('warn', 'Token metadata enrichment failed', err));
+    }
   }
 
   return NextResponse.json({

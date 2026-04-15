@@ -245,7 +245,7 @@ export const SNAPSHOT_WINDOWS = [1, 4, 24, 168] as const; // hours
 // ── Helius webhook config ─────────────────────────────────────
 
 export const WEBHOOK_CONFIG = {
-  transaction_types: ['TRANSFER', 'SWAP'] as const,
+  transaction_types: ['TRANSFER', 'SWAP', 'ADD_LIQUIDITY', 'REMOVE_LIQUIDITY'] as const,
   webhook_type: 'enhanced' as const,
   encoding: 'jsonParsed' as const,
   max_exchange_addresses: 20,  // 16 live

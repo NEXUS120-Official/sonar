@@ -32,7 +32,9 @@ export type AlertType =
   | 'defi_rotation'
   | 'stablecoin_flow'
   | 'whale_large_move'
-  | 'weekly_report';
+  | 'weekly_report'
+  | 'token_accumulation'
+  | 'smart_money_token_buy';
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 
@@ -208,6 +210,18 @@ export interface TokenMovementRow {
   created_at:      string;
 }
 
+export interface TokenMetadataRow {
+  id:          string;
+  mint:        string;
+  symbol:      string | null;
+  name:        string | null;
+  decimals:    number | null;
+  is_pump_fun: boolean;
+  logo_uri:    string | null;
+  created_at:  string;
+  updated_at:  string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -279,6 +293,11 @@ export interface Database {
         Row: TokenMovementRow;
         Insert: Omit<TokenMovementRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
         Update: Partial<Omit<TokenMovementRow, 'id'>>;
+      };
+      token_metadata: {
+        Row: TokenMetadataRow;
+        Insert: Omit<TokenMetadataRow, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string };
+        Update: Partial<Omit<TokenMetadataRow, 'id'>>;
       };
       gmgn_smart_money_cache: {
         Row: GmgnSmartMoneyCacheRow;

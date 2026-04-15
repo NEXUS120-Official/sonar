@@ -41,15 +41,17 @@ function formatRelativeTimestamp(iso: string): string {
 // ── Alert type → emoji + label ────────────────────────────────
 
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
-  exchange_spike:     '📈 Exchange Spike',
-  accumulation_wave:  '🟢 Accumulation Wave',
-  distribution_wave:  '🔴 Distribution Wave',
-  staking_shift:      '⚡ Staking Shift',
-  flow_reversal:      '🔀 Flow Reversal',
-  defi_rotation:      '🔄 DeFi Rotation',
-  stablecoin_flow:    '💵 Stablecoin Flow',
-  whale_large_move:   '🐋 Whale Move',
-  weekly_report:      '📊 Weekly Report',
+  exchange_spike:          '📈 Exchange Spike',
+  accumulation_wave:       '🟢 Accumulation Wave',
+  distribution_wave:       '🔴 Distribution Wave',
+  staking_shift:           '⚡ Staking Shift',
+  flow_reversal:           '🔀 Flow Reversal',
+  defi_rotation:           '🔄 DeFi Rotation',
+  stablecoin_flow:         '💵 Stablecoin Flow',
+  whale_large_move:        '🐋 Whale Move',
+  weekly_report:           '📊 Weekly Report',
+  token_accumulation:      '🎯 Token Accumulation',
+  smart_money_token_buy:   '🧠 Smart Money Buy',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────
