@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev scripts (one-off migrations, audits, probes)
+/scripts/
+
+# signal quality artifacts and discovery output
+/artifacts/
+
+# claude code + agent runtime files
+/.claude/
+/.agents/
+skills-lock.json
+
+# supabase local temp
+/supabase/.temp/
