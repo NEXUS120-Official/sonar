@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { MobileNav } from '@/components/MobileNav';
+import { NavLink } from '@/components/NavLink';
 
 const NAV = [
   { href: '/dashboard',               label: 'Overview',       icon: '◈' },
@@ -47,15 +48,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         {/* Nav items */}
         <nav className="flex flex-col gap-1 p-3 flex-1">
           {NAV.map(n => (
-            <Link
-              key={n.href}
-              href={n.href}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-[#1e1e2e]"
-              style={{ color: '#6b6b80', fontFamily: 'var(--font-body)' }}
-            >
-              <span className="text-base w-5 text-center">{n.icon}</span>
-              {n.label}
-            </Link>
+            <NavLink key={n.href} href={n.href} icon={n.icon} label={n.label} />
           ))}
         </nav>
 

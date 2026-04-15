@@ -29,7 +29,7 @@ import { detectAnomalies, type AlertInsert } from '@/lib/flow-engine/anomaly-det
 import { type RecentAlertMap }               from '@/lib/flow-engine/dedup';
 import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
-import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType } from '@/lib/supabase/types';
+import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistoryRow } from '@/lib/supabase/types';
 import type { FlowMetrics } from '@/lib/flow-engine/aggregator';
 
 // ── Logging ───────────────────────────────────────────────────
@@ -209,12 +209,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         net_usdc_flow_usd:         snapshot4h.net_usdc_flow_usd,
         net_defi_flow_usd:         snapshot4h.net_defi_flow_usd,
       });
-      await db.from('bias_index_history').insert({
+      // bias_index_history not in auto-generated schema — cast required
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from('bias_index_history').insert({
         score:      biasResult.score,
         bias:       biasResult.bias,
-        components: biasResult.components as any,
         confidence: biasResult.confidence,
-      } as any);
+        components: biasResult.components,
+      });
       log('info', `Bias index saved: ${biasResult.score} (${biasResult.bias})`);
     } catch (err) {
       log('warn', `Bias index history save failed: ${String(err)}`);

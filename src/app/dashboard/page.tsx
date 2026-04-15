@@ -9,7 +9,7 @@ import { WWWDWidget } from '@/components/WWWDWidget';
 import { ProGate } from '@/components/ProGate';
 import { SummaryCard } from '@/components/SummaryCard';
 import { MovementRow } from '@/components/MovementRow';
-import type { FlowSnapshotRow, MovementRow as MovRow } from '@/lib/supabase/types';
+import type { FlowSnapshotRow, MovementRow as MovRow, BiasIndexHistoryRow } from '@/lib/supabase/types';
 
 function fmtUsd(v: number) {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
@@ -117,8 +117,8 @@ async function getData() {
   ]);
 
   const snap       = (snapRes.data as FlowSnapshotRow | null);
-  const biasLatest = biasLatestRes.data as any;
-  const biasHist   = (biasHistRes.data ?? []) as any[];
+  const biasLatest = biasLatestRes.data as Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'confidence' | 'components' | 'created_at'> | null;
+  const biasHist   = (biasHistRes.data ?? []) as Pick<BiasIndexHistoryRow, 'score' | 'created_at'>[];
   const movements  = (movRes.data ?? []) as Pick<
     MovRow,
     'id' | 'flow_type' | 'flow_direction' | 'from_label' | 'to_label' |

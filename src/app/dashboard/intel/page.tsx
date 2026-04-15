@@ -11,7 +11,7 @@ import {
   summariseCohorts,
   type WhaleMovementSummary,
 } from '@/lib/flow-engine/cohort-analysis';
-import type { FlowSnapshotRow, MovementRow } from '@/lib/supabase/types';
+import type { FlowSnapshotRow, MovementRow, BiasIndexHistoryRow } from '@/lib/supabase/types';
 
 async function getData() {
   const db     = createAdminClient();
@@ -53,7 +53,7 @@ async function getData() {
   ]);
 
   // ── Bias history (downsampled 4h) ──
-  const rawBias = (biasRes.data ?? []) as any[];
+  const rawBias = (biasRes.data ?? []) as Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'created_at'>[];
   const biasBuckets = new Map<string, any>();
   for (const p of rawBias) {
     const slot = Math.floor(new Date(p.created_at).getTime() / (4 * 3_600_000));

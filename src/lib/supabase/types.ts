@@ -141,6 +141,18 @@ export interface AlertRow {
   created_at: string;
 }
 
+// Finer-grained bias label stored in bias_index_history (superset of MarketBias)
+export type BiasLabel = 'extreme_bearish' | 'bearish' | 'neutral' | 'bullish' | 'extreme_bullish';
+
+export interface BiasIndexHistoryRow {
+  id:         string;
+  score:      number;        // -100..+100
+  bias:       BiasLabel;
+  confidence: number;        // 0-100 (% of active components)
+  components: Record<string, { score: number; interpretation: string }> | null;
+  created_at: string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -202,6 +214,11 @@ export interface Database {
         Row: AlertRow;
         Insert: Omit<AlertRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
         Update: Partial<Omit<AlertRow, 'id'>>;
+      };
+      bias_index_history: {
+        Row: BiasIndexHistoryRow;
+        Insert: Omit<BiasIndexHistoryRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<BiasIndexHistoryRow, 'id'>>;
       };
       gmgn_smart_money_cache: {
         Row: GmgnSmartMoneyCacheRow;

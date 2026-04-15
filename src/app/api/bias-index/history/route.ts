@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import type { BiasIndexHistoryRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,12 +31,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     // For 30d view, downsample to one per 4h bucket to reduce payload
-    let points = (data ?? []) as any[];
+    let points = (data ?? []) as Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'confidence' | 'components' | 'created_at'>[];
     if (days > 7) {
-      const buckets = new Map<string, any>();
+      const buckets = new Map<string, typeof points[number]>();
       for (const p of points) {
-        const d    = new Date(p.created_at as string);
-        const slot = Math.floor(d.getTime() / (4 * 60 * 60 * 1000));
+        const slot = Math.floor(new Date(p.created_at).getTime() / (4 * 60 * 60 * 1000));
         buckets.set(String(slot), p); // last wins per bucket
       }
       points = Array.from(buckets.values());

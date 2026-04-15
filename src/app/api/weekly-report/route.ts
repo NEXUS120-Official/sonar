@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import type { BiasIndexHistoryRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,23 +42,23 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
     }
 
     // Downsample bias history to 4h buckets for performance
-    const rawBias = (biasRes.data ?? []) as any[];
-    const buckets = new Map<string, { score: number; bias: string; created_at: string }>();
+    const rawBias = (biasRes.data ?? []) as Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'created_at'>[];
+    const buckets = new Map<string, Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'created_at'>>();
     for (const p of rawBias) {
-      const slot = Math.floor(new Date(p.created_at as string).getTime() / (4 * 3_600_000));
+      const slot = Math.floor(new Date(p.created_at).getTime() / (4 * 3_600_000));
       buckets.set(String(slot), p);
     }
     const biasHistory = Array.from(buckets.values());
 
     // Compute stats from full hourly set
-    const scores = rawBias.map((p: any) => p.score as number);
+    const scores = rawBias.map(p => p.score);
     const avgScore  = scores.length ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length) : null;
     const highScore = scores.length ? Math.max(...scores) : null;
     const lowScore  = scores.length ? Math.min(...scores) : null;
 
     // Dominant bias: mode of bias labels
     const biasCounts: Record<string, number> = {};
-    for (const p of rawBias) biasCounts[p.bias as string] = (biasCounts[p.bias] ?? 0) + 1;
+    for (const p of rawBias) biasCounts[p.bias] = (biasCounts[p.bias] ?? 0) + 1;
     const dominantBias = Object.keys(biasCounts).sort((a, b) => biasCounts[b] - biasCounts[a])[0] ?? null;
 
     // Flow summary from 168h snapshot

@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import type { BiasIndexHistoryRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -109,7 +110,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
       .limit(1)
       .single();
 
-    const biasRow = biasRowRaw as any;
+    const biasRow = biasRowRaw as Pick<BiasIndexHistoryRow, 'score' | 'bias' | 'confidence' | 'components' | 'created_at'> | null;
 
     if (biasErr || !biasRow) {
       return NextResponse.json({
