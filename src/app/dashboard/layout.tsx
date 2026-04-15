@@ -1,9 +1,10 @@
 // ============================================================
-// Dashboard Layout — sidebar navigation
+// Dashboard Layout — sidebar navigation (desktop) + mobile drawer
 // ============================================================
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { MobileNav } from '@/components/MobileNav';
 
 const NAV = [
   { href: '/dashboard',               label: 'Overview',       icon: '◈' },
@@ -17,11 +18,16 @@ const NAV = [
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen" style={{ background: '#0a0a0f', color: '#e8e8ef' }}>
+    <div
+      className="flex flex-col lg:flex-row min-h-screen"
+      style={{ background: '#0a0a0f', color: '#e8e8ef' }}
+    >
+      {/* ── Mobile top bar + slide-in drawer ───────────────── */}
+      <MobileNav />
 
-      {/* Sidebar */}
+      {/* ── Desktop sidebar (hidden on mobile) ─────────────── */}
       <aside
-        className="w-56 shrink-0 flex flex-col border-r"
+        className="hidden lg:flex w-56 shrink-0 flex-col border-r"
         style={{ background: '#0d0d14', borderColor: '#1e1e2e' }}
       >
         {/* Logo */}
@@ -67,7 +73,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* ── Main content ────────────────────────────────────── */}
       <main className="flex-1 overflow-auto">
         {children}
       </main>
