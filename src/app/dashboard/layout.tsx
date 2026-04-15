@@ -10,6 +10,7 @@ const NAV = [
   { href: '/dashboard/exchange-flow', label: 'Exchange Flow',  icon: '⇄' },
   { href: '/dashboard/staking-flow',  label: 'Staking',        icon: '◎' },
   { href: '/dashboard/whales',        label: 'Whales',         icon: '🐋' },
+  { href: '/dashboard/intel',         label: 'Intel',          icon: '◉' },
   { href: '/dashboard/alerts',        label: 'Alerts',         icon: '⚡' },
   { href: '/dashboard/settings',      label: 'Settings',       icon: '⚙' },
 ];
