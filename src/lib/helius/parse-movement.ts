@@ -182,7 +182,7 @@ export function parseMovement(
   // a known DEX program address), use feePayer + source to classify.
   // This ensures pump.fun and aggregator swaps are captured even when
   // the SOL transfer is split across many pool accounts.
-  if (tx.type === 'SWAP' || tx.type === 'ADD_LIQUIDITY' || tx.type === 'REMOVE_LIQUIDITY') {
+  if (tx.type === 'SWAP' || tx.type === 'ADD_LIQUIDITY' || tx.type === 'WITHDRAW_LIQUIDITY') {
     const feePayer    = tx.feePayer;
     const sourceUpper = (tx.source ?? '').toUpperCase();
 

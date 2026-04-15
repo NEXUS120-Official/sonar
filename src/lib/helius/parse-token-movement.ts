@@ -2,7 +2,7 @@
 // SONAR v2.0 — Token Movement Parser
 // ============================================================
 // Extracts SPL token buy/sell/LP information from Helius
-// enhanced SWAP / ADD_LIQUIDITY / REMOVE_LIQUIDITY transactions.
+// enhanced SWAP / ADD_LIQUIDITY / WITHDRAW_LIQUIDITY transactions.
 //
 // Complements parse-movement.ts which tracks SOL/USDC flows.
 // This module tracks WHICH token a whale bought or sold.
@@ -90,7 +90,7 @@ function resolveProtocol(tx: HeliusEnhancedTx): string | null {
  * Extract token-level swap information from a Helius enhanced transaction.
  *
  * Returns null if:
- * - Transaction type is not SWAP / ADD_LIQUIDITY / REMOVE_LIQUIDITY
+ * - Transaction type is not SWAP / ADD_LIQUIDITY / WITHDRAW_LIQUIDITY
  * - No relevant SPL token transfer found
  * - Whale address is not in whaleAddressSet
  */
@@ -105,7 +105,7 @@ export function parseTokenMovement(
   if (
     type !== 'SWAP' &&
     type !== 'ADD_LIQUIDITY' &&
-    type !== 'REMOVE_LIQUIDITY'
+    type !== 'WITHDRAW_LIQUIDITY'
   ) {
     return null;
   }
@@ -114,8 +114,8 @@ export function parseTokenMovement(
 
   // Determine action from type
   let baseAction: TokenMovementAction;
-  if (type === 'ADD_LIQUIDITY')    baseAction = 'add_liquidity';
-  else if (type === 'REMOVE_LIQUIDITY') baseAction = 'remove_liquidity';
+  if (type === 'ADD_LIQUIDITY')       baseAction = 'add_liquidity';
+  else if (type === 'WITHDRAW_LIQUIDITY') baseAction = 'remove_liquidity';
   else baseAction = 'buy'; // refined below for SWAP
 
   // ── Find the SPL token transfer for the whale ──────────────
