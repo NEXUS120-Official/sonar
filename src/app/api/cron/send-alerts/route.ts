@@ -168,8 +168,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       continue;
     }
 
-    // Send to free channel — only significant/major to reduce noise and token usage
-    const freeEligible = (FREE_MIN_SEVERITY as readonly string[]).includes(alert.severity ?? '');
+    // Send to free channel — significant/major for flow alerts; weekly_report always eligible
+    const freeEligible = alert.alert_type === 'weekly_report'
+      || (FREE_MIN_SEVERITY as readonly string[]).includes(alert.severity ?? '');
     let freeOk = false;
     if (!freeEligible) {
       log('info', `Skipping free channel for ${alert.severity} alert (below threshold)`);
