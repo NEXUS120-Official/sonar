@@ -33,6 +33,7 @@ export interface BiasIndexResult {
     staking:     BiasComponent;
     stablecoin:  BiasComponent;
     defi:        BiasComponent;
+    smart_money: { multiplier: number; ratio: number; interpretation: string };
   };
   confidence:  number;   // 0-100, based on how many components have signal
   updated_at:  Date;
@@ -115,6 +116,15 @@ export interface BiasIndexInput {
   net_usdc_flow_usd:         number;
   /** DeFi net deposit (positive = risk-on = bullish) */
   net_defi_flow_usd:         number;
+  /**
+   * 0.0–1.0: fraction of active whales flagged as smart_money.
+   * When provided, applies a confirmation multiplier to the final score:
+   *   ratio=0.0 → ×0.80 (mostly unknown actors — dampen signal)
+   *   ratio=0.5 → ×1.00 (neutral)
+   *   ratio=1.0 → ×1.20 (all smart money — amplify signal)
+   * Omit when no reputation data is available (defaults to ×1.00).
+   */
+  smart_money_ratio?: number;
 }
 
 export function calculateBiasIndex(input: BiasIndexInput): BiasIndexResult {
@@ -131,8 +141,21 @@ export function calculateBiasIndex(input: BiasIndexInput): BiasIndexResult {
   const stableScore = componentScore(input.net_usdc_flow_usd, STABLECOIN_PIVOT, 20);
   const defiScore   = componentScore(input.net_defi_flow_usd, DEFI_PIVOT, 20);
 
-  const raw   = exchScore + stakeScore + stableScore + defiScore;
-  const score = Math.max(-100, Math.min(100, Math.round(raw)));
+  const raw = exchScore + stakeScore + stableScore + defiScore;
+
+  // Smart money confirmation multiplier
+  // ratio=0 → ×0.80 | ratio=0.5 → ×1.00 | ratio=1 → ×1.20
+  const smRatio = input.smart_money_ratio ?? 0.5;
+  const smMult  = 0.80 + smRatio * 0.40;
+
+  function smInterp(r: number): string {
+    if (r >= 0.70) return 'high smart-money concentration — signal amplified';
+    if (r >= 0.50) return 'moderate smart-money presence';
+    if (r >= 0.30) return 'mixed reputation — signal neutral';
+    return 'low reputation data — signal dampened';
+  }
+
+  const score = Math.max(-100, Math.min(100, Math.round(raw * smMult)));
 
   // Confidence: count components with meaningful signal (>$10K)
   const active = [
@@ -142,7 +165,9 @@ export function calculateBiasIndex(input: BiasIndexInput): BiasIndexResult {
     Math.abs(input.net_defi_flow_usd)          > 10_000 ? 1 : 0,
   ].reduce((a, b) => a + b, 0);
 
-  const confidence = active === 4 ? 100 : active === 3 ? 75 : active === 2 ? 50 : 25;
+  // Confidence also boosted when smart money is concentrated
+  const smBonus = smRatio >= 0.65 ? 5 : 0;
+  const confidence = Math.min(100, (active === 4 ? 100 : active === 3 ? 75 : active === 2 ? 50 : 25) + smBonus);
 
   return {
     score,
@@ -167,6 +192,11 @@ export function calculateBiasIndex(input: BiasIndexInput): BiasIndexResult {
         score:          Math.round(defiScore),
         raw_usd:        input.net_defi_flow_usd,
         interpretation: defiInterp(input.net_defi_flow_usd),
+      },
+      smart_money: {
+        multiplier:     Math.round(smMult * 100) / 100,
+        ratio:          Math.round(smRatio * 100) / 100,
+        interpretation: smInterp(smRatio),
       },
     },
     confidence,

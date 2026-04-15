@@ -17,7 +17,8 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { sendMessage } from '@/lib/telegram/bot';
 import { formatFlowAlert } from '@/lib/telegram/formatter';
-import type { AlertRow } from '@/lib/supabase/types';
+import { getCachedSolPrice } from '@/lib/helius/sol-price-cache';
+import type { AlertRow, FlowType, SignalDirection } from '@/lib/supabase/types';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -86,6 +87,67 @@ async function markSent(
   if (error) log('error', `Failed to mark alert ${alertId} as sent`, error.message);
 }
 
+// ── Signal direction from flow type ──────────────────────────
+
+function flowTypeToSignalDirection(flowType: FlowType): SignalDirection {
+  switch (flowType) {
+    case 'exchange_withdrawal':
+    case 'defi_deposit':
+    case 'unstake':
+      return 'bullish';
+    case 'exchange_deposit':
+    case 'defi_withdrawal':
+    case 'stake':
+      return 'bearish';
+    default:
+      return 'neutral';
+  }
+}
+
+// ── Record signal outcomes for whale movements in an alert ────
+
+async function recordSignalOutcomes(
+  db: ReturnType<typeof createAdminClient>,
+  alert: AlertRow,
+  solPriceUsd: number,
+): Promise<void> {
+  // Only process alerts that have associated movements
+  const movementIds = alert.movement_ids;
+  if (!movementIds || movementIds.length === 0) return;
+
+  try {
+    // Fetch the movements and their whale_id
+    const { data: movRows, error: movErr } = await db
+      .from('movements')
+      .select('id, whale_id, flow_type')
+      .in('id', movementIds)
+      .not('whale_id', 'is', null);
+
+    if (movErr || !movRows) return;
+
+    const rows = movRows as { id: string; whale_id: string; flow_type: FlowType }[];
+
+    for (const mov of rows) {
+      if (!mov.whale_id) continue;
+
+      const signalDirection = flowTypeToSignalDirection(mov.flow_type);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (db as any).from('whale_signal_outcomes').insert({
+        whale_id:         mov.whale_id,
+        movement_id:      mov.id,
+        alert_id:         alert.id,
+        signal_direction: signalDirection,
+        signal_time:      alert.created_at,
+        price_at_signal:  solPriceUsd,
+        resolved:         false,
+      });
+    }
+  } catch (err) {
+    log('warn', `Failed to record signal outcomes for alert ${alert.id}`, err);
+  }
+}
+
 // ── Receipt type ──────────────────────────────────────────────
 
 interface SendReceipt {
@@ -130,6 +192,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   log('info', `Starting send-alerts run (free=${freeChannelId}, premium=${premiumEnabled ? premiumChannelId : 'disabled'})`);
 
   const db = createAdminClient();
+
+  // Fetch SOL price once for signal outcome recording
+  const solPriceUsd = await getCachedSolPrice().catch(() => 0);
 
   // ── 1. Fetch unsent alerts (free not sent) ─────────────────
   const { data: alertsRaw, error: fetchErr } = await db

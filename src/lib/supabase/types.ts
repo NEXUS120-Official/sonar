@@ -79,6 +79,39 @@ export interface WhaleRow {
   discovered_at: string;
   balance_updated_at: string | null;
   created_at: string;
+  // Reputation columns — added by migration 007
+  reputation_score:   number | null;
+  signal_count_30d:   number | null;
+  hit_rate_30d:       number | null;
+  mean_return_30d:    number | null;
+  last_reputation_at: string | null;
+  smart_money_flag:   boolean | null;
+}
+
+export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
+
+export interface WhaleSignalOutcomeRow {
+  id:               string;
+  whale_id:         string;
+  movement_id:      string | null;
+  alert_id:         string | null;
+  signal_direction: SignalDirection;
+  signal_time:      string;
+  price_at_signal:  number | null;
+  price_5m:         number | null;
+  price_15m:        number | null;
+  price_1h:         number | null;
+  price_4h:         number | null;
+  return_5m:        number | null;
+  return_15m:       number | null;
+  return_1h:        number | null;
+  return_4h:        number | null;
+  hit_5m:           boolean | null;
+  hit_15m:          boolean | null;
+  hit_1h:           boolean | null;
+  hit_4h:           boolean | null;
+  resolved:         boolean;
+  created_at:       string;
 }
 
 export interface MovementRow {
@@ -263,6 +296,11 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Omit<UserProfileRow, 'id'>>;
+      };
+      whale_signal_outcomes: {
+        Row: WhaleSignalOutcomeRow;
+        Insert: Omit<WhaleSignalOutcomeRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<WhaleSignalOutcomeRow, 'id'>>;
       };
     };
     Views: {

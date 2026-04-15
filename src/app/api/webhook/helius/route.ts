@@ -16,7 +16,9 @@ import { createAdminClient }               from '@/lib/supabase/server';
 import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 import { parseTokenMovement, type ParsedTokenMovement } from '@/lib/helius/parse-token-movement';
 import { getCachedSolPrice }               from '@/lib/helius/sol-price-cache';
-import type { MovementRow, TokenMovementRow } from '@/lib/supabase/types';
+import { sendMessage }                     from '@/lib/telegram/bot';
+import { formatFlowAlert }                 from '@/lib/telegram/formatter';
+import type { MovementRow, TokenMovementRow, AlertRow } from '@/lib/supabase/types';
 
 const WEBHOOK_AUTH_HEADER = 'authorization';
 
@@ -137,6 +139,144 @@ async function persistTokenMovements(
 
 // ── POST handler ──────────────────────────────────────────────
 
+// ── Hot-path alert: fires immediately for large single moves ──
+// Bypasses the 5-min process-flows cron for whale_large_move alerts.
+// Runs fire-and-forget so the webhook response stays fast.
+
+const HOT_ALERT_THRESHOLD_USD = 200_000;   // minimum to trigger
+const HOT_ALERT_COOLDOWN_MS   = 30 * 60_000; // 30-min per-whale cooldown
+
+// In-memory last-fired map (best-effort in serverless — cron dedup is the safety net)
+const _lastHotAlert = new Map<string, number>();
+
+async function fireHotAlerts(
+  movements: (ReturnType<typeof parseMovement>)[],
+  solPrice:  number,
+): Promise<void> {
+  const db = createAdminClient();
+
+  const HOT_TYPES = new Set(['exchange_deposit', 'exchange_withdrawal', 'stake', 'unstake', 'defi_deposit', 'defi_withdrawal']);
+
+  const candidates = movements.filter(
+    (m): m is NonNullable<typeof m> =>
+      m !== null &&
+      HOT_TYPES.has(m.flow_type) &&
+      (m.amount_usd ?? 0) >= HOT_ALERT_THRESHOLD_USD,
+  );
+
+  if (candidates.length === 0) return;
+
+  // Resolve whale_ids for candidates
+  const addrs = [...new Set(candidates.flatMap(m => [m.from_address, m.to_address]))];
+  const { data: whaleRows } = await db
+    .from('whales')
+    .select('id, address, label, reputation_score, smart_money_flag')
+    .in('address', addrs)
+    .eq('is_active', true);
+
+  const whaleByAddr = new Map<string, { id: string; label: string | null; reputation_score: number | null; smart_money_flag: boolean | null }>(
+    ((whaleRows ?? []) as any[]).map((w: any) => [w.address, w]),
+  );
+
+  const freeChannel    = process.env.TELEGRAM_CHANNEL_ID ?? '';
+  const premiumChannel = process.env.TELEGRAM_PREMIUM_CHANNEL_ID ?? '';
+  if (!freeChannel) return;
+
+  for (const m of candidates) {
+    const whale = whaleByAddr.get(m.from_address) ?? whaleByAddr.get(m.to_address);
+    const whaleId = whale?.id ?? null;
+    const cooldownKey = whaleId ?? m.from_address;
+
+    // Cooldown check — in-memory
+    const lastFired = _lastHotAlert.get(cooldownKey) ?? 0;
+    if (Date.now() - lastFired < HOT_ALERT_COOLDOWN_MS) continue;
+
+    const amtUsd = m.amount_usd ?? 0;
+    const severity =
+      amtUsd >= 2_000_000 ? 'major' :
+      amtUsd >= 500_000   ? 'significant' :
+      amtUsd >= 200_000   ? 'notable' : 'info';
+
+    const dirLabel =
+      m.flow_type === 'exchange_withdrawal' ? 'withdrawn from exchange' :
+      m.flow_type === 'exchange_deposit'    ? 'deposited to exchange' :
+      m.flow_type === 'stake'               ? 'staked' :
+      m.flow_type === 'unstake'             ? 'unstaked' :
+      m.flow_type === 'defi_deposit'        ? 'moved to DeFi' :
+      m.flow_type === 'defi_withdrawal'     ? 'withdrawn from DeFi' : 'moved';
+
+    const fmtUsd = (v: number) =>
+      v >= 1e9 ? `$${(v/1e9).toFixed(2)}B` :
+      v >= 1e6 ? `$${(v/1e6).toFixed(2)}M` :
+      v >= 1e3 ? `$${(v/1e3).toFixed(0)}K` : `$${v.toFixed(0)}`;
+
+    const smartBadge = whale?.smart_money_flag ? ' ⭐ Smart Money' : '';
+    const repBadge   = whale?.reputation_score ? ` [rep ${whale.reputation_score}]` : '';
+
+    const title = `Whale ${dirLabel} ${fmtUsd(amtUsd)}${smartBadge}`;
+    const body  = [
+      whale?.label ? `Wallet: ${whale.label}${repBadge}` : `Address: ${m.from_address.slice(0, 8)}…`,
+      `Action: ${dirLabel}`,
+      m.exchange ? `Exchange: ${m.exchange}` : m.protocol ? `Protocol: ${m.protocol}` : null,
+      `Amount: ${fmtUsd(amtUsd)} SOL @ $${solPrice.toFixed(2)}`,
+    ].filter(Boolean).join('\n');
+
+    // Insert alert
+    const { data: alertInserted, error: insertErr } = await db
+      .from('alerts')
+      .insert({
+        alert_type:            'whale_large_move',
+        severity,
+        title,
+        body,
+        data:                  { amount_usd: amtUsd, flow_type: m.flow_type, exchange: m.exchange, protocol: m.protocol, whale_id: whaleId, smart_money: whale?.smart_money_flag ?? false },
+        movement_ids:          null,
+        ai_analysis:           null,
+        sent_telegram_free:    false,
+        sent_telegram_premium: false,
+        sent_at:               null,
+      } as any)
+      .select('id')
+      .single();
+
+    if (insertErr || !alertInserted) continue;
+
+    // Build the AlertRow for the formatter
+    const alertRow: AlertRow = {
+      id:                    (alertInserted as any).id,
+      alert_type:            'whale_large_move',
+      severity,
+      title,
+      body,
+      data:                  { amount_usd: amtUsd },
+      ai_analysis:           null,
+      movement_ids:          null,
+      sent_telegram_free:    false,
+      sent_telegram_premium: false,
+      sent_at:               null,
+      created_at:            new Date().toISOString(),
+    };
+
+    const text = formatFlowAlert(alertRow);
+
+    // Only significant/major go to free; all go to premium
+    const sendFree = ['significant', 'major'].includes(severity);
+    const [freeOk, premOk] = await Promise.all([
+      sendFree ? sendMessage({ chatId: freeChannel, text }).then(r => r.ok).catch(() => false) : Promise.resolve(true),
+      premiumChannel ? sendMessage({ chatId: premiumChannel, text }).then(r => r.ok).catch(() => false) : Promise.resolve(false),
+    ]);
+
+    await (db as any).from('alerts').update({
+      sent_telegram_free:    sendFree ? freeOk : false,
+      sent_telegram_premium: premOk,
+      sent_at:               new Date().toISOString(),
+    }).eq('id', (alertInserted as any).id);
+
+    _lastHotAlert.set(cooldownKey, Date.now());
+    log('info', `Hot alert fired: ${title} (free=${sendFree && freeOk}, premium=${premOk})`);
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Auth ────────────────────────────────────────────────
   const authHeader = req.headers.get(WEBHOOK_AUTH_HEADER);
@@ -196,6 +336,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 5. Persist movements ───────────────────────────────────
   const { inserted, skipped } = await persistMovements(movements);
   log('info', `Persisted ${inserted} movements (${skipped} skipped/duplicate)`);
+
+  // ── 5b. Hot-path alerts (fire-and-forget — <5s latency) ───
+  // Large individual whale moves bypass the cron chain entirely.
+  fireHotAlerts(movements, solPriceUsd).catch((err) =>
+    log('warn', 'Hot alert pipeline error', err),
+  );
 
   // ── 6. Persist token movements ─────────────────────────────
   // Build a signature→movement_id map from persisted movements

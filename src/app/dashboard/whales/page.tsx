@@ -32,12 +32,6 @@ const COHORT_META: Record<string, { label: string; color: string; bg: string }> 
   unknown:     { label: '—',      color: '#4b4b60', bg: '#1e1e2e'   },
 };
 
-const METHOD_LABELS: Record<string, string> = {
-  manual:              'Manual',
-  exchange_withdrawal: 'Ex. Withdrawal',
-  gmgn_feed:           'GMGN Feed',
-  balance_scan:        'Balance Scan',
-};
 
 async function getData() {
   const db    = createAdminClient();
@@ -45,7 +39,7 @@ async function getData() {
 
   const [whalesRes, movsRes] = await Promise.all([
     db.from('whales')
-      .select('id, address, label, sol_balance, usdc_balance, total_value_usd, whale_type, discovery_method, balance_updated_at, is_active')
+      .select('id, address, label, sol_balance, total_value_usd, whale_type, balance_updated_at, is_active, reputation_score, hit_rate_30d, signal_count_30d, smart_money_flag')
       .order('total_value_usd', { ascending: false, nullsFirst: false })
       .limit(200),
 
@@ -57,8 +51,9 @@ async function getData() {
 
   const whales = (whalesRes.data ?? []) as Pick<
     WhaleRow,
-    'id' | 'address' | 'label' | 'sol_balance' | 'usdc_balance' | 'total_value_usd' |
-    'whale_type' | 'discovery_method' | 'balance_updated_at' | 'is_active'
+    'id' | 'address' | 'label' | 'sol_balance' | 'total_value_usd' |
+    'whale_type' | 'balance_updated_at' | 'is_active' |
+    'reputation_score' | 'hit_rate_30d' | 'signal_count_30d' | 'smart_money_flag'
   >[];
 
   const rawMovs = (movsRes.data ?? []) as Pick<MovementRow, 'whale_id' | 'flow_type' | 'flow_direction' | 'amount_usd' | 'block_time'>[];
@@ -189,10 +184,10 @@ export default async function WhalesPage() {
           >
             <span>Address</span>
             <span className="text-right">SOL</span>
-            <span className="text-right">USDC</span>
             <span className="text-right">Total</span>
             <span>Cohort</span>
-            <span>Discovery</span>
+            <span className="text-right">Rep</span>
+            <span className="text-right">Hit%</span>
             <span>Last Move</span>
           </div>
 
@@ -232,11 +227,6 @@ export default async function WhalesPage() {
                   {w.sol_balance ? w.sol_balance.toFixed(0) : '—'}
                 </span>
 
-                {/* USDC */}
-                <span className="text-right" style={{ fontFamily: 'var(--font-mono)', color: '#e8e8ef', fontSize: '0.82rem' }}>
-                  {fmtUsd(w.usdc_balance)}
-                </span>
-
                 {/* Total */}
                 <span
                   className="text-right font-semibold"
@@ -258,9 +248,30 @@ export default async function WhalesPage() {
                   {cm.label}
                 </span>
 
-                {/* Discovery */}
-                <span className="text-xs" style={{ color: '#6b6b80' }}>
-                  {METHOD_LABELS[w.discovery_method ?? ''] ?? w.discovery_method ?? '—'}
+                {/* Rep score */}
+                <span className="text-right" style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize:   '0.82rem',
+                  color: w.reputation_score != null
+                    ? w.reputation_score >= 70 ? '#00e599'
+                    : w.reputation_score >= 40 ? '#ffd60a'
+                    : '#9b9bb0'
+                    : '#4b4b60',
+                }}>
+                  {w.smart_money_flag ? '⭐ ' : ''}{w.reputation_score != null ? w.reputation_score : '—'}
+                </span>
+
+                {/* Hit % */}
+                <span className="text-right" style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize:   '0.82rem',
+                  color: w.hit_rate_30d != null
+                    ? w.hit_rate_30d >= 0.65 ? '#00e599'
+                    : w.hit_rate_30d >= 0.50 ? '#ffd60a'
+                    : '#9b9bb0'
+                    : '#4b4b60',
+                }}>
+                  {w.hit_rate_30d != null ? `${(w.hit_rate_30d * 100).toFixed(0)}%` : '—'}
                 </span>
 
                 {/* Last move */}

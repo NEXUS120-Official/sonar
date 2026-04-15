@@ -203,11 +203,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 4b. Save Bias Index History (4h window) ────────────────
   if (snapshot4h) {
     try {
+      // Fetch smart money ratio for confirmation weighting
+      const { data: smData } = await db
+        .from('whales')
+        .select('smart_money_flag')
+        .eq('is_active', true)
+        .not('smart_money_flag', 'is', null);
+
+      const smAll   = (smData ?? []) as { smart_money_flag: boolean | null }[];
+      const smCount = smAll.filter(w => w.smart_money_flag === true).length;
+      const smRatio = smAll.length > 0 ? smCount / smAll.length : 0.5;
+
       const biasResult = calculateBiasIndex({
         sol_net_exchange_flow_usd: snapshot4h.sol_net_exchange_flow_usd,
         net_staking_flow_usd:      snapshot4h.net_staking_flow_usd,
         net_usdc_flow_usd:         snapshot4h.net_usdc_flow_usd,
         net_defi_flow_usd:         snapshot4h.net_defi_flow_usd,
+        smart_money_ratio:         smRatio,
       });
       // bias_index_history not in auto-generated schema — cast required
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
