@@ -54,35 +54,146 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Load recent token_movements ───────────────────────────
   const { data: movRaw } = await (db as any)
     .from('token_movements')
-    .select('whale_id, token_mint, token_symbol, action, amount_usd, is_new_token, block_time')
+    .select('whale_id, token_mint, token_symbol, action, amount_usd, is_new_token, block_time, protocol')
     .gte('block_time', since)
     .not('whale_id', 'is', null)
     .in('action', ['buy', 'sell']);
 
   const movements = (movRaw ?? []) as Pick<
     TokenMovementRow,
-    'whale_id' | 'token_mint' | 'token_symbol' | 'action' | 'amount_usd' | 'is_new_token' | 'block_time'
+    'whale_id' | 'token_mint' | 'token_symbol' | 'action' | 'amount_usd' | 'is_new_token' | 'block_time' | 'protocol'
   >[];
 
   if (movements.length === 0) {
     return NextResponse.json({ ok: true, signals: 0, duration_ms: Date.now() - startMs });
   }
 
-  // ── 2. Load smart_money_flag for whale IDs seen ────────────────
+  // ── 2. Load whale metadata for IDs seen ───────────────────────
   const whaleIds = [...new Set(movements.map(m => m.whale_id).filter(Boolean) as string[])];
 
   const { data: whaleRaw } = await db
     .from('whales')
-    .select('id, smart_money_flag')
+    .select('id, label, address, smart_money_flag, reputation_score')
     .in('id', whaleIds);
 
+  type WhaleMeta = Pick<WhaleRow, 'id' | 'label' | 'address' | 'smart_money_flag' | 'reputation_score'>;
+  const whaleMetaMap = new Map<string, WhaleMeta>(
+    ((whaleRaw ?? []) as WhaleMeta[]).map(w => [w.id, w]),
+  );
+
   const smartMoneySet = new Set(
-    ((whaleRaw ?? []) as Pick<WhaleRow, 'id' | 'smart_money_flag'>[])
+    ((whaleRaw ?? []) as WhaleMeta[])
       .filter(w => w.smart_money_flag)
       .map(w => w.id),
   );
 
-  // ── 3. Run confluence detection ───────────────────────────────
+  // ── Channel refs (used by both smart_money_token_buy and token_accumulation) ─
+  const freeChannel    = process.env.TELEGRAM_CHANNEL_ID ?? '';
+  const premiumChannel = process.env.TELEGRAM_PREMIUM_CHANNEL_ID ?? '';
+  let fired = 0;
+
+  // ── 3. Smart money individual buy alerts ─────────────────────
+  // Fires smart_money_token_buy when a tracked smart-money whale buys
+  // a token with amount >= $2k (cooldown: 4h per whale+token combo).
+  const SM_BUY_THRESHOLD_USD = 2_000;
+  const SM_COOLDOWN_MS       = 4 * 60 * 60_000;
+  const smCooldownKey        = (wId: string, mint: string) => `sm:${wId}:${mint}`;
+
+  function fmtUsd(v: number): string {
+    return v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M`
+         : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K`
+         : `$${v.toFixed(0)}`;
+  }
+
+  // Deduplicate by whale+token, keep largest buy
+  const smBuyMap = new Map<string, typeof movements[0]>();
+  for (const m of movements) {
+    if (!m.whale_id || !smartMoneySet.has(m.whale_id)) continue;
+    if (m.action !== 'buy') continue;
+    if ((m.amount_usd ?? 0) < SM_BUY_THRESHOLD_USD) continue;
+    const key = `${m.whale_id}:${m.token_mint}`;
+    const existing = smBuyMap.get(key);
+    if (!existing || (m.amount_usd ?? 0) > (existing.amount_usd ?? 0)) {
+      smBuyMap.set(key, m);
+    }
+  }
+
+  for (const [, m] of smBuyMap) {
+    const cdKey = smCooldownKey(m.whale_id!, m.token_mint);
+
+    // Use the same in-memory cooldown map (keyed differently from token_accumulation)
+    const lastSm = _lastFired.get(cdKey) ?? 0;
+    if (Date.now() - lastSm < SM_COOLDOWN_MS) continue;
+
+    const whale      = whaleMetaMap.get(m.whale_id!);
+    const whaleLabel = whale?.label ?? (whale?.address ? `${whale.address.slice(0, 6)}…` : 'Whale');
+    const token      = m.token_symbol ?? m.token_mint.slice(0, 8);
+    const amtUsd     = m.amount_usd ?? 0;
+    const repScore   = whale?.reputation_score ?? 0.5;
+
+    const severity   = amtUsd >= 50_000 ? 'major'
+                     : amtUsd >= 5_000  ? 'significant'
+                     : 'notable' as const;
+
+    const title = `Smart Money: ${whaleLabel} → ${token} (${fmtUsd(amtUsd)})`;
+    const body  = [
+      `Token:      ${token}`,
+      `Amount:     ${fmtUsd(amtUsd)}`,
+      `Whale:      ${whaleLabel}`,
+      `Track rec:  ${(repScore * 100).toFixed(0)}/100`,
+      `Protocol:   ${m.protocol ?? '—'}`,
+    ].join('\n');
+
+    const { data: smInserted, error: smErr } = await (db as any)
+      .from('alerts')
+      .insert({
+        alert_type:            'smart_money_token_buy',
+        severity,
+        title,
+        body,
+        ai_analysis:           null,
+        data: {
+          token_mint:       m.token_mint,
+          token_symbol:     m.token_symbol,
+          amount_usd:       amtUsd,
+          whale_id:         m.whale_id,
+          whale_label:      whaleLabel,
+          reputation_score: repScore,
+          protocol:         m.protocol,
+        },
+        movement_ids:          null,
+        sent_telegram_free:    false,
+        sent_telegram_premium: false,
+        sent_at:               null,
+      })
+      .select('id')
+      .single();
+
+    if (smErr || !smInserted) continue;
+
+    const smText   = `🧠 *${title}*\n\n${body}`;
+    const sendFree = freeChannel && ['significant', 'major'].includes(severity);
+
+    const [smFreeOk, smPremOk] = await Promise.all([
+      sendFree
+        ? sendMessage({ chatId: freeChannel, text: smText }).then(r => r.ok).catch(() => false)
+        : Promise.resolve(false),
+      premiumChannel
+        ? sendMessage({ chatId: premiumChannel, text: smText }).then(r => r.ok).catch(() => false)
+        : Promise.resolve(false),
+    ]);
+
+    await (db as any).from('alerts').update({
+      sent_telegram_free:    smFreeOk,
+      sent_telegram_premium: smPremOk,
+      sent_at:               new Date().toISOString(),
+    }).eq('id', (smInserted as any).id);
+
+    _lastFired.set(cdKey, Date.now());
+    fired++;
+  }
+
+  // ── 4. Run token accumulation confluence detection ────────────
   const enriched = movements.map(m => ({
     whale_id:    m.whale_id,
     token_mint:  m.token_mint,
@@ -100,12 +211,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, signals: 0, duration_ms: Date.now() - startMs });
   }
 
-  // ── 4. Fire alerts for new signals (not on cooldown) ─────────
-  const freeChannel    = process.env.TELEGRAM_CHANNEL_ID ?? '';
-  const premiumChannel = process.env.TELEGRAM_PREMIUM_CHANNEL_ID ?? '';
-
-  let fired = 0;
-
+  // ── 5. Fire token_accumulation alerts ────────────────────────
   for (const sig of signals) {
     const cooldownKey = sig.token_mint;
     if (onCooldown(cooldownKey)) continue;

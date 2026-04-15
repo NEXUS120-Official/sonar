@@ -2,7 +2,8 @@
 // Token Intelligence — Whale token movements from token_movements
 // ============================================================
 
-import { createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient }   from '@/lib/supabase/server';
+import TokenPredictionCard      from '@/components/TokenPredictionCard';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -143,6 +144,32 @@ export default async function TokensPage() {
           </div>
         ))}
       </div>
+
+      {/* Token prediction — top token by volume */}
+      {tokens.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <TokenPredictionCard
+              mint={tokens[0].mint}
+              symbol={tokens[0].symbol}
+            />
+          </div>
+          <div className="lg:col-span-2 rounded-xl border p-5 space-y-3" style={{ background: '#111118', borderColor: '#2A2A3A' }}>
+            <p className="text-sm font-semibold" style={{ fontFamily: 'var(--font-heading)' }}>
+              How Token Prediction Works
+            </p>
+            <div className="space-y-2 text-xs" style={{ color: '#8888AA' }}>
+              <p>• <span style={{ color: '#F0F0F8' }}>4h whale accumulation pattern</span> — buy/sell pressure ratio from tracked wallets</p>
+              <p>• <span style={{ color: '#F0F0F8' }}>Smart money weighting</span> — reputation-adjusted signal from whales with ≥62% hit rate</p>
+              <p>• <span style={{ color: '#F0F0F8' }}>Pump.fun context</span> — higher volatility thresholds applied to pump.fun tokens</p>
+              <p>• <span style={{ color: '#F0F0F8' }}>Directional confluence</span> — amplified when multiple signals align in same direction</p>
+            </div>
+            <p className="text-xs pt-2 border-t" style={{ borderColor: '#2A2A3A', color: '#4b4b60', fontFamily: 'var(--font-mono)' }}>
+              Prediction updates per page load · showing top token by whale volume
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Smart money feed */}
       {smartMoves.length > 0 && (
