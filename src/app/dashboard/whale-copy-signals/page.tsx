@@ -3,6 +3,7 @@
 // ============================================================
 
 import { createAdminClient } from '@/lib/supabase/server';
+import { ProGate }           from '@/components/ProGate';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -203,7 +204,8 @@ export default async function WhaleCopySignalsPage() {
         ))}
       </div>
 
-      {/* Signal feed */}
+      {/* Signal feed — Pro gated */}
+      <ProGate featureName="Whale Copy Signals" ctaLabel="Unlock Smart Money Signals">
       {signals.length === 0 ? (
         <div className="rounded-xl border p-10 text-center" style={{ background: '#111118', borderColor: '#2A2A3A', color: '#8888AA' }}>
           <p className="text-base font-semibold">No smart money signals yet.</p>
@@ -312,6 +314,7 @@ export default async function WhaleCopySignalsPage() {
           </div>
         </div>
       )}
+      </ProGate>
     </div>
   );
 }

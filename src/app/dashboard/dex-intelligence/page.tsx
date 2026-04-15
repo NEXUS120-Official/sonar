@@ -3,6 +3,7 @@
 // ============================================================
 
 import { createAdminClient } from '@/lib/supabase/server';
+import { ProGate }           from '@/components/ProGate';
 import type { TokenMovementRow } from '@/lib/supabase/types';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -180,7 +181,8 @@ export default async function DexIntelligencePage() {
         ))}
       </div>
 
-      {/* DEX breakdown */}
+      {/* DEX breakdown — Pro gated */}
+      <ProGate featureName="DEX Intelligence" ctaLabel="Unlock DEX Intelligence">
       {sortedDexes.length === 0 ? (
         <div className="rounded-xl border p-10 text-center" style={{ background: '#111118', borderColor: '#2A2A3A', color: '#8888AA' }}>
           <p className="text-base font-semibold">No DEX data yet.</p>
@@ -270,6 +272,7 @@ export default async function DexIntelligencePage() {
           </div>
         </div>
       )}
+      </ProGate>
     </div>
   );
 }

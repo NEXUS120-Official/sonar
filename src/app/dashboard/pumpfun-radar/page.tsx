@@ -3,6 +3,7 @@
 // ============================================================
 
 import { createAdminClient } from '@/lib/supabase/server';
+import { ProGate }           from '@/components/ProGate';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -155,7 +156,8 @@ export default async function PumpfunRadarPage() {
         ))}
       </div>
 
-      {/* Token table */}
+      {/* Token table + feed — Pro gated */}
+      <ProGate featureName="Pump.fun Radar" ctaLabel="Unlock Pump.fun Radar">
       {tokens.length === 0 ? (
         <div className="rounded-xl border p-10 text-center" style={{ background: '#111118', borderColor: '#2A2A3A', color: '#8888AA' }}>
           <p className="text-base font-semibold">No pump.fun activity yet.</p>
@@ -293,6 +295,7 @@ export default async function PumpfunRadarPage() {
           </div>
         </div>
       )}
+      </ProGate>
     </div>
   );
 }

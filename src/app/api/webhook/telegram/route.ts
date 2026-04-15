@@ -12,6 +12,9 @@ import {
   handleStaking,
   handleWhale,
   handleReport,
+  handlePredict,
+  handleTokens,
+  handleSignals,
   handlePro,
 } from '@/lib/telegram/commands';
 
@@ -55,6 +58,9 @@ async function dispatch(msg: TelegramMessage): Promise<void> {
     case '/staking':   response = await handleStaking();            break;
     case '/whale':     response = await handleWhale(arg0);          break;
     case '/report':    response = await handleReport();             break;
+    case '/predict':   response = await handlePredict();            break;
+    case '/tokens':    response = await handleTokens();             break;
+    case '/signals':   response = await handleSignals();            break;
     case '/pro':       response = handlePro();                      break;
     default:           return;
   }

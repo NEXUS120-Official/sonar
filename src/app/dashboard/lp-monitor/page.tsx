@@ -3,6 +3,7 @@
 // ============================================================
 
 import { createAdminClient } from '@/lib/supabase/server';
+import { ProGate }           from '@/components/ProGate';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -158,7 +159,8 @@ export default async function LpMonitorPage() {
         </div>
       </div>
 
-      {/* Event feed */}
+      {/* Event feed — Pro gated */}
+      <ProGate featureName="LP Monitor" ctaLabel="Unlock LP Monitor">
       {events.length === 0 ? (
         <div className="rounded-xl border p-10 text-center" style={{ background: '#111118', borderColor: '#2A2A3A', color: '#8888AA' }}>
           <p className="text-base font-semibold">No LP events yet.</p>
@@ -228,6 +230,7 @@ export default async function LpMonitorPage() {
           </div>
         </div>
       )}
+      </ProGate>
     </div>
   );
 }
