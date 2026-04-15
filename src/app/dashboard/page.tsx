@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { BiasGauge } from '@/components/BiasGauge';
 import { BiasChart } from '@/components/BiasChart';
 import { WWWDWidget } from '@/components/WWWDWidget';
+import { ProGate } from '@/components/ProGate';
 import { SummaryCard } from '@/components/SummaryCard';
 import { MovementRow } from '@/components/MovementRow';
 import type { FlowSnapshotRow, MovementRow as MovRow } from '@/lib/supabase/types';
@@ -198,26 +199,28 @@ export default async function DashboardPage() {
 
         {/* WWWD */}
         <div className="lg:col-span-3 flex flex-col justify-center">
-          {wwwd ? (
-            <WWWDWidget
-              signal={wwwd.signal}
-              confidence={wwwd.confidence}
-              score={biasScore ?? 0}
-              bias={biasBias ?? 'neutral'}
-              headline={wwwd.headline}
-              rationale={wwwd.rationale}
-              cohort_distribution={cohortDist}
-              generated_at={biasLatest?.created_at}
-            />
-          ) : (
-            <div
-              className="rounded-xl border p-8 text-center"
-              style={{ background: '#12121a', borderColor: '#1e1e2e', color: '#4b4b60' }}
-            >
-              <p className="text-sm" style={{ color: '#6b6b80' }}>What Would Whales Do?</p>
-              <p className="text-xs mt-2">Signal available once Bias Index data arrives.</p>
-            </div>
-          )}
+          <ProGate featureName="What Would Whales Do?">
+            {wwwd ? (
+              <WWWDWidget
+                signal={wwwd.signal}
+                confidence={wwwd.confidence}
+                score={biasScore ?? 0}
+                bias={biasBias ?? 'neutral'}
+                headline={wwwd.headline}
+                rationale={wwwd.rationale}
+                cohort_distribution={cohortDist}
+                generated_at={biasLatest?.created_at}
+              />
+            ) : (
+              <div
+                className="rounded-xl border p-8 text-center"
+                style={{ background: '#12121a', borderColor: '#1e1e2e', color: '#4b4b60' }}
+              >
+                <p className="text-sm" style={{ color: '#6b6b80' }}>What Would Whales Do?</p>
+                <p className="text-xs mt-2">Signal available once Bias Index data arrives.</p>
+              </div>
+            )}
+          </ProGate>
         </div>
 
       </div>
