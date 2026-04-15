@@ -26,6 +26,11 @@ const TELEGRAM_DELAY_MS      = 500; // 2 msg/s — well within Telegram rate lim
 const FREE_CHANNEL_ID    = () => process.env.TELEGRAM_CHANNEL_ID         ?? '';
 const PREMIUM_CHANNEL_ID = () => process.env.TELEGRAM_PREMIUM_CHANNEL_ID ?? '';
 
+// Free group only receives high-value alerts — notable/info stay silent to save
+// Anthropic tokens and reduce noise for subscribers.
+const FREE_MIN_SEVERITY = ['significant', 'major'] as const;
+type Severity = typeof FREE_MIN_SEVERITY[number] | 'notable' | 'info';
+
 // ── Logging ───────────────────────────────────────────────────
 
 function log(level: 'info' | 'warn' | 'error', msg: string, ctx?: unknown) {
@@ -163,10 +168,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       continue;
     }
 
-    // Send to free channel
+    // Send to free channel — only significant/major to reduce noise and token usage
+    const freeEligible = (FREE_MIN_SEVERITY as readonly string[]).includes(alert.severity ?? '');
     let freeOk = false;
+    if (!freeEligible) {
+      log('info', `Skipping free channel for ${alert.severity} alert (below threshold)`);
+      freeOk = true; // mark as "sent" so it doesn't re-queue — premium still runs below
+    }
     try {
-      freeOk = await sendWithDelay(freeChannelId, text, 'free channel');
+      if (freeEligible) freeOk = await sendWithDelay(freeChannelId, text, 'free channel');
     } catch (err) {
       log('error', `Free channel send threw for alert ${alert.id}`, err);
       errors.push(`Free channel exception for alert ${alert.id}: ${String(err)}`);

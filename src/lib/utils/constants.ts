@@ -211,8 +211,9 @@ export const ALERT_COOLDOWNS_MS: Record<string, number> = {
 } as const;
 
 // Minimum fractional change in the key metric to allow refire within cooldown.
-// 0.20 = 20 % — filters cosmetic fluctuations while catching meaningful new moves.
-export const ALERT_MIN_CHANGE_PCT = 0.20;
+// 0.50 = 50% — raised from 0.20 to suppress repeated near-identical alerts during
+// volatile windows and reduce Anthropic token consumption.
+export const ALERT_MIN_CHANGE_PCT = 0.50;
 
 // ── Alert severity labels ─────────────────────────────────────
 
@@ -234,11 +235,11 @@ export const WEBHOOK_CONFIG = {
   webhook_type: 'enhanced' as const,
   encoding: 'jsonParsed' as const,
   max_exchange_addresses: 20,  // 16 live
-  max_whale_addresses:    50,
+  max_whale_addresses:    55,  // raised from 50 → 55 (R8 import: 53 active after adding 3)
   max_staking_addresses:  10,  // 5 live
   max_defi_addresses:     15,  // 9 live (Raydium x2, Orca, Jupiter x2, Marginfi, Drift, Kamino, Solend)
   max_bridge_addresses:    5,  // 2 live (Wormhole x2)
-  total_budget:          150,  // 16 exch + 5 staking + 9 defi + 2 bridge + 50 whales = 82 used
+  total_budget:          150,  // 16 exch + 5 staking + 9 defi + 2 bridge + 55 whales = 87 used (cap); 63 headroom
 } as const;
 
 // ── GMGN API ──────────────────────────────────────────────────
