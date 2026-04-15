@@ -1,24 +1,29 @@
 @import "tailwindcss";
 
 /* ============================================================
-   SONAR Design System
+   SONAR Design System — NEXUS Brand Palette
    ============================================================ */
 
 :root {
   /* Background layers */
-  --bg-primary:    #0a0a0f;
-  --bg-surface:    #12121a;
-  --bg-border:     #1e1e2e;
+  --bg-primary:    #0A0A0F;
+  --bg-surface:    #111118;
+  --bg-elevated:   #1A1A24;
+  --bg-border:     #2A2A3A;
 
-  /* Accent colors */
-  --accent-green:  #00e599;
-  --accent-red:    #ff4757;
-  --accent-blue:   #00b8ff;
-  --accent-yellow: #ffd60a;
+  /* Accent colors — NEXUS palette */
+  --accent-primary:   #7B61FF;  /* electric violet — primary accent */
+  --accent-secondary: #00D4FF;  /* cyan blue — secondary accent */
+  --accent-green:     #00E5A0;  /* teal green — positive states only */
+  --accent-red:       #FF4D6A;  /* danger / negative states */
+  --accent-yellow:    #FFB800;  /* warning / alerts only */
+
+  /* Legacy aliases retained for gradual migration */
+  --accent-blue:   #00D4FF;
 
   /* Text */
-  --text-primary:  #e8e8ef;
-  --text-muted:    #6b6b80;
+  --text-primary:  #F0F0F8;
+  --text-muted:    #8888AA;
 
   /* Fonts */
   --font-heading: var(--font-space-grotesk), 'Space Grotesk', sans-serif;

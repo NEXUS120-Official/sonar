@@ -16,10 +16,10 @@ export function NavLink({ href, icon, label }: Props) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-[#1e1e2e]"
+      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-[#1A1A24]"
       style={{
-        color:      active ? '#e8e8ef' : '#6b6b80',
-        background: active ? '#1e1e2e' : 'transparent',
+        color:      active ? '#F0F0F8' : '#8888AA',
+        background: active ? '#1A1A24' : 'transparent',
         fontFamily: 'var(--font-body)',
       }}
     >

@@ -19,7 +19,7 @@ interface Props {
 export async function ProGate({
   children,
   featureName = 'Pro Feature',
-  ctaHref = 'https://t.me/sonar_nexus',
+  ctaHref = 'https://t.me/+XE4ANzPt9YFlOGE8',
   ctaLabel = 'Join Pro on Telegram',
 }: Props) {
   const db = await createClient();
@@ -57,19 +57,19 @@ export async function ProGate({
           letterSpacing: '0.12em',
           padding:       '3px 10px',
           borderRadius:  4,
-          background:    '#ffd60a20',
-          color:         '#ffd60a',
-          border:        '1px solid #ffd60a40',
+          background:    '#FFB80020',
+          color:         '#FFB800',
+          border:        '1px solid #FFB80040',
           fontFamily:    'var(--font-mono)',
           textTransform: 'uppercase',
         }}>
           PRO
         </span>
 
-        <p style={{ color: '#e8e8ef', fontWeight: 700, fontSize: 15, textAlign: 'center', margin: 0 }}>
+        <p style={{ color: '#F0F0F8', fontWeight: 700, fontSize: 15, textAlign: 'center', margin: 0 }}>
           {featureName}
         </p>
-        <p style={{ color: '#6b6b80', fontSize: 12, textAlign: 'center', margin: 0, maxWidth: 220 }}>
+        <p style={{ color: '#8888AA', fontSize: 12, textAlign: 'center', margin: 0, maxWidth: 220 }}>
           Available to Pro subscribers. Upgrade to unlock real-time whale signals.
         </p>
 
@@ -84,9 +84,9 @@ export async function ProGate({
             marginTop:     4,
             padding:       '8px 18px',
             borderRadius:  8,
-            background:    '#00e59918',
-            border:        '1px solid #00e59940',
-            color:         '#00e599',
+            background:    '#7B61FF18',
+            border:        '1px solid #7B61FF40',
+            color:         '#7B61FF',
             fontSize:      13,
             fontWeight:    700,
             textDecoration:'none',
