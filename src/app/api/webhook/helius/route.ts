@@ -334,6 +334,35 @@ async function fireHotAlerts(
   }
 }
 
+// ── Raw transaction archive (sovereign data pipeline) ────────
+// Writes raw Helius payloads to raw_transactions before any parsing.
+// This is the immutable append-only log — the foundation of data sovereignty.
+
+async function logRawTransactions(txns: HeliusEnhancedTx[]): Promise<void> {
+  if (txns.length === 0) return;
+  const db = createAdminClient() as any;
+
+  const rows = txns
+    .filter(tx => tx?.signature)
+    .map(tx => ({
+      signature:  tx.signature,
+      slot:       (tx as any).slot ?? null,
+      block_time: tx.timestamp ? new Date(tx.timestamp * 1000).toISOString() : null,
+      is_vote:    false,
+      status:     (tx as any).transactionError ? 'failed' : 'success',
+      fee:        tx.fee ?? null,
+      raw_json:   tx,
+      source:     'helius_webhook',
+    }));
+
+  if (rows.length === 0) return;
+
+  // ignoreDuplicates: true — safe to re-run on Helius retries
+  await db
+    .from('raw_transactions')
+    .upsert(rows, { onConflict: 'signature', ignoreDuplicates: true });
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Auth ────────────────────────────────────────────────
   const authHeader = req.headers.get(WEBHOOK_AUTH_HEADER);
@@ -357,6 +386,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   log('info', `Received ${transactions.length} transaction(s)`);
+
+  // ── 2b. Raw log — fire-and-forget (sovereign data archive) ─
+  // Saves the raw Helius payload to raw_transactions before any
+  // parsing or classification. Even failed-to-parse txns are logged.
+  // Non-blocking: never delays the webhook response.
+  logRawTransactions(transactions as HeliusEnhancedTx[]).catch((err) =>
+    log('warn', 'Raw transaction logging failed', err),
+  );
 
   // ── 3. Fetch live SOL price + whale addresses in parallel ─
   const [whaleAddresses, solPriceUsd] = await Promise.all([

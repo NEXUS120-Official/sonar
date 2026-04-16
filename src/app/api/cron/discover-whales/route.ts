@@ -25,6 +25,7 @@ import {
   checkWhaleQualification,
   getSolPriceUsd,
 } from '@/lib/whale-discovery/balance-checker';
+import { getGMGNProvider } from '@/lib/providers';
 import { FLOW_THRESHOLDS } from '@/lib/utils/constants';
 import type { MovementRow, WhaleRow } from '@/lib/supabase/types';
 
@@ -121,6 +122,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     log('warn', 'SOL price fetch failed — using fallback $85', err);
   }
 
+  // ── 2a. GMGN smart money feed (secondary discovery path) ─────
+  // Uses GMGNWalletProvider adapter — enforces `maker` field, never `account_address`.
+  // Results are merged with the exchange-withdrawal candidates below.
+  const gmgnCandidates = new Map<string, { amount_usd: number; exchange: string | null }>();
+  try {
+    const gmgn     = getGMGNProvider();
+    const gmgnWallets = await gmgn.discoverWhales({ min_value_usd: FLOW_THRESHOLDS.whale.min_withdrawal_usd, limit: 30 });
+    for (const w of gmgnWallets) {
+      gmgnCandidates.set(w.address, { amount_usd: w.total_value_usd, exchange: null });
+    }
+    log('info', `GMGN feed: ${gmgnCandidates.size} candidate(s)`);
+  } catch (err) {
+    log('warn', 'GMGN discovery failed — continuing with exchange_withdrawal only', err);
+  }
+
   // ── 2. Load recent large exchange withdrawals ───────────────
   const cutoff = new Date(
     Date.now() - CANDIDATE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
@@ -150,8 +166,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   log('info', `Found ${movements.length} qualifying withdrawal(s)`);
 
   // ── 3. Deduplicate candidates ───────────────────────────────
-  // Keep the largest-amount withdrawal per address (already ordered desc)
+  // Merge exchange_withdrawal + GMGN candidates into one map.
+  // Exchange withdrawals take priority (have known exchange context).
   const candidateMap = new Map<string, { amount_usd: number; exchange: string | null }>();
+
+  // Seed with GMGN first (lower priority)
+  for (const [addr, meta] of gmgnCandidates) {
+    candidateMap.set(addr, meta);
+  }
+
+  // Overlay exchange_withdrawal (higher priority — overwrites GMGN for same address)
   for (const m of movements) {
     if (!candidateMap.has(m.to_address)) {
       candidateMap.set(m.to_address, {
@@ -239,7 +263,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           staked_msol:      null,
           staked_jitosol:   null,
           whale_type:       'unknown',
-          discovery_method: 'exchange_withdrawal',
+          discovery_method: candidate.exchange ? 'exchange_withdrawal' : 'gmgn_feed',
           balance_updated_at: new Date().toISOString(),
         });
 
