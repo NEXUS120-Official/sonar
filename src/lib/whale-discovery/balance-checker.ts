@@ -1,11 +1,14 @@
 // ============================================================
 // SONAR v2.0 — Whale Balance Checker
 // ============================================================
-// Uses Helius DAS getAssetsByOwner to fetch the full portfolio
-// value (SOL + all SPL tokens with on-chain prices), replacing
-// the old SOL-only + USDC-only RPC approach.
+// Uses the PUBLIC Solana RPC (zero Helius credits) for balance
+// checks — getAccountInfo for SOL, getTokenAccountsByOwner for USDC.
+// total_value_usd = sol_balance * sol_price + usdc_balance.
 //
-// Qualification threshold: $500K total portfolio value.
+// This replaces the previous DAS getAssetsByOwner approach which
+// cost 10 Helius credits per call (94 whales/hour = 676K credits/month).
+//
+// Qualification threshold: $500K total value.
 // ============================================================
 
 import { USDC_MINT, FLOW_THRESHOLDS } from '@/lib/utils/constants';
@@ -17,15 +20,13 @@ const LAMPORTS_PER_SOL    = 1_000_000_000;
 const COINGECKO_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
 const BINANCE_PRICE_URL   = 'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT';
 
-// ── Helius RPC/DAS URL ────────────────────────────────────────
+// Public Solana RPC — free, no credits, rate-limited to ~10 req/s
+const PUBLIC_RPC_URLS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://solana-mainnet.g.alchemy.com/v2/demo', // Alchemy public demo
+];
 
-function heliusRpcUrl(): string {
-  const key = process.env.HELIUS_API_KEY;
-  if (!key) throw new Error('[balance-checker] Missing HELIUS_API_KEY');
-  return `https://mainnet.helius-rpc.com/?api-key=${key}`;
-}
-
-// ── SOL price (for discover-whales receipt + fallback) ────────
+// ── SOL price ─────────────────────────────────────────────────
 
 export async function getSolPriceUsd(): Promise<number> {
   // Primary: CoinGecko
@@ -55,123 +56,83 @@ export async function getSolPriceUsd(): Promise<number> {
   return SOL_PRICE_FALLBACK_USD;
 }
 
-// ── DAS portfolio fetch ───────────────────────────────────────
+// ── Public RPC JSON-RPC helper ────────────────────────────────
+
+async function rpcCall(method: string, params: unknown[]): Promise<unknown> {
+  const errors: string[] = [];
+  for (const url of PUBLIC_RPC_URLS) {
+    try {
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal:  AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { result: unknown; error?: { message: string } };
+      if (json.error) throw new Error(json.error.message);
+      return json.result;
+    } catch (err) {
+      errors.push(`${url}: ${String(err)}`);
+    }
+  }
+  throw new Error(`All RPC endpoints failed: ${errors.join(' | ')}`);
+}
+
+// ── SOL balance ───────────────────────────────────────────────
+
+async function getSolBalance(address: string): Promise<number> {
+  const result = await rpcCall('getAccountInfo', [
+    address,
+    { encoding: 'base64' },
+  ]) as { value: { lamports: number } | null } | null;
+
+  const lamports = result?.value?.lamports ?? 0;
+  return lamports / LAMPORTS_PER_SOL;
+}
+
+// ── USDC balance ──────────────────────────────────────────────
+
+async function getUsdcBalance(address: string): Promise<number> {
+  const result = await rpcCall('getTokenAccountsByOwner', [
+    address,
+    { mint: USDC_MINT },
+    { encoding: 'jsonParsed' },
+  ]) as { value: Array<{ account: { data: { parsed: { info: { tokenAmount: { uiAmount: number } } } } } }> } | null;
+
+  const accounts = result?.value ?? [];
+  let total = 0;
+  for (const acc of accounts) {
+    const ui = acc?.account?.data?.parsed?.info?.tokenAmount?.uiAmount ?? 0;
+    total += ui;
+  }
+  return total;
+}
+
+// ── Portfolio value ───────────────────────────────────────────
 
 export interface PortfolioValue {
-  sol_balance:     number;   // native SOL
-  usdc_balance:    number;   // USDC token balance
-  total_value_usd: number;   // SOL + all SPL tokens priced
-  token_count:     number;   // distinct fungible tokens held
-}
-
-interface DasAssetItem {
-  id:         string;
-  interface?: string;
-  token_info?: {
-    balance:    number;
-    decimals:   number;
-    price_info?: {
-      price_per_token?: number;
-      total_price?:     number;
-    };
-  };
-}
-
-interface DasResponse {
-  result: {
-    total:         number;
-    nativeBalance?: {
-      lamports:      number;
-      total_price?:  number;     // SOL value in USD (Helius-enriched)
-      price_per_sol?: number;
-    };
-    items: DasAssetItem[];
-  };
-  error?: { message: string };
+  sol_balance:     number;
+  usdc_balance:    number;
+  total_value_usd: number;
+  token_count:     number; // always 0 — kept for API compat with update-balances
 }
 
 /**
- * Fetch full portfolio value for a wallet using Helius DAS getAssetsByOwner.
- * Returns SOL + all priced SPL token balances summed into total_value_usd.
- * Falls back to SOL-only if DAS is unavailable.
+ * Fetch SOL + USDC balances using the public Solana RPC (zero Helius credits).
+ * total_value_usd = sol * sol_price + usdc.
  */
 export async function getPortfolioValue(address: string): Promise<PortfolioValue> {
-  const url = heliusRpcUrl();
+  const solPrice = await getSolPriceUsd();
 
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      jsonrpc: '2.0',
-      id:      1,
-      method:  'getAssetsByOwner',
-      params:  {
-        ownerAddress:   address,
-        page:           1,
-        limit:          1000,
-        displayOptions: {
-          showFungible:       true,
-          showNativeBalance:  true,
-          showZeroBalance:    false,
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  const [sol_balance, usdc_balance] = await Promise.all([
+    getSolBalance(address),
+    getUsdcBalance(address),
+  ]);
 
-  if (!res.ok) {
-    throw new Error(`DAS getAssetsByOwner HTTP ${res.status}`);
-  }
+  const total_value_usd = sol_balance * solPrice + usdc_balance;
 
-  const json = (await res.json()) as DasResponse;
-  if (json.error) throw new Error(`DAS error: ${json.error.message}`);
-
-  const result = json.result;
-
-  // Native SOL
-  const lamports    = result.nativeBalance?.lamports ?? 0;
-  const sol_balance = lamports / LAMPORTS_PER_SOL;
-
-  // SOL USD value — use DAS-provided price if available, else fetch separately
-  let solUsdValue: number;
-  if (result.nativeBalance?.total_price && result.nativeBalance.total_price > 0) {
-    solUsdValue = result.nativeBalance.total_price;
-  } else {
-    const solPrice = await getSolPriceUsd();
-    solUsdValue    = sol_balance * solPrice;
-  }
-
-  // SPL tokens
-  const fungibles = (result.items ?? []).filter(
-    (item) => item.interface === 'FungibleToken' || item.token_info,
-  );
-
-  let usdc_balance   = 0;
-  let tokenUsdTotal  = 0;
-  let token_count    = 0;
-
-  for (const item of fungibles) {
-    const ti = item.token_info;
-    if (!ti) continue;
-
-    const rawBalance = ti.balance ?? 0;
-    const decimals   = ti.decimals ?? 0;
-    const uiBalance  = rawBalance / Math.pow(10, decimals);
-
-    // Track USDC separately for DB compat
-    if (item.id === USDC_MINT) {
-      usdc_balance = uiBalance;
-    }
-
-    // Sum all token USD values
-    const tokenUsd = ti.price_info?.total_price ?? 0;
-    tokenUsdTotal += tokenUsd;
-    if (uiBalance > 0) token_count++;
-  }
-
-  const total_value_usd = solUsdValue + tokenUsdTotal;
-
-  return { sol_balance, usdc_balance, total_value_usd, token_count };
+  return { sol_balance, usdc_balance, total_value_usd, token_count: 0 };
 }
 
 // ── Qualification check ───────────────────────────────────────
@@ -183,9 +144,8 @@ export interface WhaleQualification {
 }
 
 /**
- * Check if a wallet qualifies as a whale via full DAS portfolio scan.
- * Returns null if total_value_usd < FLOW_THRESHOLDS.whale.min_total_value_usd ($500K).
- * Throws on DAS error — caller must catch.
+ * Check if a wallet qualifies as a whale (>= $500K SOL+USDC value).
+ * Returns null if below threshold. Throws on RPC error.
  */
 export async function checkWhaleQualification(
   address: string,

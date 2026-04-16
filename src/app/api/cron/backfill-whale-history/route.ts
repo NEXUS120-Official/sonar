@@ -27,7 +27,7 @@ import type { WhaleRow, TokenMovementRow } from '@/lib/supabase/types';
 
 // ── Config ────────────────────────────────────────────────────
 
-const MAX_WHALES_PER_RUN  = 5;
+const MAX_WHALES_PER_RUN  = 2;   // 3 calls × 100 Helius credits each → 600 credits/run
 const TXN_LIMIT_PER_CALL  = 100;
 const LOOKBACK_DAYS       = 90;
 const WHALE_WINDOW_DAYS   = 7;   // only backfill whales added in last N days
