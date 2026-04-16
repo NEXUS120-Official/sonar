@@ -159,22 +159,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const total_value_usd = sol_balance * sol_price_usd + usdc_balance;
 
     try {
-      const updatePayload: Record<string, unknown> = {
-        sol_balance,
-        usdc_balance,
-        total_value_usd,
-        balance_updated_at: new Date().toISOString(),
-      };
-
-      // Deactivate if below $500K threshold
-      if (total_value_usd < 500_000) {
-        updatePayload['is_active'] = false;
-        log('warn', `  ${whale.address} below $500K ($${total_value_usd.toFixed(0)}) — deactivating`);
-      }
-
+      // Note: no deactivation here — SOL+USDC only is incomplete. Whales may hold
+      // $500K+ in other SPL tokens not checked here. Deactivation is handled by the
+      // discover-whales cron which uses full DAS portfolio data.
       const { error: updateErr } = await dbAny
         .from('whales')
-        .update(updatePayload)
+        .update({
+          sol_balance,
+          usdc_balance,
+          total_value_usd,
+          balance_updated_at: new Date().toISOString(),
+        })
         .eq('id', whale.id);
 
       if (updateErr) throw new Error(`DB update: ${updateErr.message}`);
@@ -189,53 +184,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     await new Promise(r => setTimeout(r, USDC_DELAY_MS));
-  }
-
-  // ── 5. Re-activation pass (recently deactivated whales) ────
-  try {
-    const { data: inactiveRaw } = await db
-      .from('whales')
-      .select('id, address, label')
-      .eq('is_active', false)
-      .order('balance_updated_at', { ascending: true })
-      .limit(5);
-
-    const inactive = (inactiveRaw ?? []) as Pick<WhaleRow, 'id' | 'address' | 'label'>[];
-
-    if (inactive.length > 0) {
-      log('info', `Re-activation pass: checking ${inactive.length} inactive whale(s)`);
-      let inactiveSolBalances = new Map<string, number>();
-      try {
-        inactiveSolBalances = await getBatchSolBalances(inactive.map(w => w.address));
-      } catch { /* skip re-activation if batch fails */ }
-
-      for (const whale of inactive) {
-        const sol_balance = inactiveSolBalances.get(whale.address) ?? 0;
-        let usdc_balance = 0;
-        try {
-          usdc_balance = await getUsdcBalance(whale.address);
-        } catch { /* use 0 */ }
-
-        const total_value_usd = sol_balance * sol_price_usd + usdc_balance;
-        const is_active       = total_value_usd >= 500_000;
-
-        if (is_active) {
-          log('info', `  Re-activating ${whale.address} — $${total_value_usd.toFixed(0)}`);
-        }
-
-        await dbAny.from('whales').update({
-          sol_balance,
-          usdc_balance,
-          total_value_usd,
-          balance_updated_at: new Date().toISOString(),
-          ...(is_active ? { is_active: true } : {}),
-        }).eq('id', whale.id);
-
-        await new Promise(r => setTimeout(r, USDC_DELAY_MS));
-      }
-    }
-  } catch (err) {
-    log('warn', 'Re-activation pass failed', err);
   }
 
   const receipt = buildReceipt(runAt, startMs, whales_updated, whales_failed, sol_price_usd, errors);
