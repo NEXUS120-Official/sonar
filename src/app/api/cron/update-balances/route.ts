@@ -64,7 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const errors: string[] = [];
   let whales_updated = 0;
   let whales_failed  = 0;
-  let sol_price_usd  = 130;
+  let sol_price_usd  = 85;
 
   if (!verifyCronSecret(req)) {
     log('warn', 'Unauthorized cron request');
@@ -143,6 +143,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     await new Promise((r) => setTimeout(r, DELAY_MS));
+  }
+
+  // ── 4. Re-activation pass (check recently deactivated whales) ─
+  // Load up to 5 inactive whales, check their current balance, re-activate
+  // those whose portfolio has recovered above the $500K threshold.
+  try {
+    const { data: inactiveRaw } = await db
+      .from('whales')
+      .select('id, address, label')
+      .eq('is_active', false)
+      .order('balance_updated_at', { ascending: true }) // least-recently-checked first
+      .limit(5);
+
+    const inactive = (inactiveRaw ?? []) as Pick<WhaleRow, 'id' | 'address' | 'label'>[];
+
+    for (const whale of inactive) {
+      try {
+        const portfolio = await getPortfolioValue(whale.address);
+        const { sol_balance, usdc_balance, total_value_usd } = portfolio;
+
+        const update: Record<string, unknown> = {
+          sol_balance,
+          usdc_balance,
+          total_value_usd,
+          balance_updated_at: new Date().toISOString(),
+        };
+
+        if (total_value_usd >= 500_000) {
+          update['is_active'] = true;
+          log('info', `Re-activating ${whale.address} — balance recovered to $${total_value_usd.toFixed(0)}`);
+        } else {
+          log('info', `${whale.address} still below threshold ($${total_value_usd.toFixed(0)})`);
+        }
+
+        await dbAny.from('whales').update(update).eq('id', whale.id);
+      } catch (err) {
+        log('warn', `Re-activation check failed for ${whale.address}`, err);
+      }
+      await new Promise((r) => setTimeout(r, DELAY_MS));
+    }
+  } catch (err) {
+    log('warn', 'Re-activation pass failed', err);
   }
 
   const r = buildReceipt(runAt, startMs, whales_updated, whales_failed, sol_price_usd, errors);

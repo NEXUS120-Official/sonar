@@ -120,21 +120,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const cutoff168h = windowCutoff(168);
   log('info', `Loading movements since ${cutoff168h}`);
 
-  const { data: movementsRaw, error: movErr } = await db
-    .from('movements')
-    .select('*')
-    .gte('block_time', cutoff168h)
-    .order('block_time', { ascending: false })
-    .limit(10_000);
+  const PAGE_SIZE  = 1_000;
+  const MAX_PAGES  = 50; // hard cap at 50,000 rows
+  const movements: MovementRow[] = [];
+  let pageOffset   = 0;
+  let fetchErr: string | null = null;
 
-  if (movErr) {
-    const msg = `Failed to load movements: ${movErr.message}`;
-    log('error', msg);
-    errors.push(msg);
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data: pageRaw, error: pageErr } = await db
+      .from('movements')
+      .select('*')
+      .gte('block_time', cutoff168h)
+      .order('block_time', { ascending: false })
+      .range(pageOffset, pageOffset + PAGE_SIZE - 1);
+
+    if (pageErr) {
+      fetchErr = `Failed to load movements (page ${page}): ${pageErr.message}`;
+      break;
+    }
+
+    const rows = (pageRaw ?? []) as MovementRow[];
+    movements.push(...rows);
+    if (rows.length < PAGE_SIZE) break; // last page
+    pageOffset += PAGE_SIZE;
+  }
+
+  if (fetchErr) {
+    log('error', fetchErr);
+    errors.push(fetchErr);
     return NextResponse.json(receipt(runAt, startMs, 0, 0, 0, errors));
   }
 
-  const movements = (movementsRaw ?? []) as MovementRow[];
   movements_scanned = movements.length;
   log('info', `Loaded ${movements_scanned} movements`);
 

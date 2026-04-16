@@ -103,7 +103,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let inserted   = 0;
   let skipped    = 0;
   let failed     = 0;
-  let solPrice   = 130;
+  let solPrice   = 85;
 
   if (!verifyCronSecret(req)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     solPrice = await getSolPriceUsd();
     log('info', `SOL price: $${solPrice}`);
   } catch (err) {
-    log('warn', 'SOL price fetch failed — using fallback $130', err);
+    log('warn', 'SOL price fetch failed — using fallback $85', err);
   }
 
   // ── 2. Load recent large exchange withdrawals ───────────────

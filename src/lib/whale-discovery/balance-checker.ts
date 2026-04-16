@@ -9,11 +9,11 @@
 // ============================================================
 
 import { USDC_MINT, FLOW_THRESHOLDS } from '@/lib/utils/constants';
+import { SOL_PRICE_FALLBACK_USD } from '@/lib/helius/sol-price-cache';
 
 // ── Constants ─────────────────────────────────────────────────
 
 const LAMPORTS_PER_SOL    = 1_000_000_000;
-const SOL_PRICE_FALLBACK  = 120;
 const COINGECKO_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
 const BINANCE_PRICE_URL   = 'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT';
 
@@ -52,7 +52,7 @@ export async function getSolPriceUsd(): Promise<number> {
       if (price > 0) return price;
     } catch { /* fall through */ }
   }
-  return SOL_PRICE_FALLBACK;
+  return SOL_PRICE_FALLBACK_USD;
 }
 
 // ── DAS portfolio fetch ───────────────────────────────────────

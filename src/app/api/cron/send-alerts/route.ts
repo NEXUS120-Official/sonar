@@ -194,7 +194,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const db = createAdminClient();
 
   // Fetch SOL price once for signal outcome recording
-  const solPriceUsd = await getCachedSolPrice().catch(() => 0);
+  const solPriceUsd = await getCachedSolPrice().catch(() => 85);
 
   // ── 1. Fetch unsent alerts (free not sent) ─────────────────
   const { data: alertsRaw, error: fetchErr } = await db
