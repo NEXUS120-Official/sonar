@@ -38,6 +38,32 @@ export {
   type ParsedTokenMovement as DecodedTokenMovement,
 } from '@/lib/helius/parse-token-movement';
 
+// ── In-memory RawTxRow construction ──────────────────────────
+// Converts a live payload into the RawTxRow shape so the normalizer
+// can be called without a DB round-trip.
+
+import type { HeliusEnhancedTx } from '@/lib/helius/parse-movement';
+import type { RawTxRow } from '@/lib/ingest/ingest-rpc';
+export type { RawTxRow } from '@/lib/ingest/ingest-rpc';
+
+export function txToRawRow(
+  tx:     HeliusEnhancedTx,
+  source: string = 'helius_webhook',
+): RawTxRow {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = tx as any;
+  return {
+    signature:  tx.signature,
+    slot:       raw.slot ?? null,
+    block_time: tx.timestamp ? new Date(tx.timestamp * 1000).toISOString() : null,
+    is_vote:    false,
+    status:     raw.transactionError ? 'failed' : 'success',
+    fee:        tx.fee ?? null,
+    raw_json:   tx,
+    source,
+  };
+}
+
 // ── Decoder metadata ──────────────────────────────────────────
 
 export const DECODER_VERSION = 'helius_enhanced_v1';

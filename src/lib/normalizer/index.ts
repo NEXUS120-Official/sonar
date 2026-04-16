@@ -38,10 +38,12 @@ export interface NormalizationContext {
 }
 
 export interface NormalizedOutput {
-  signature:     string;
-  movement:      Omit<MovementRow, 'id' | 'processed_at' | 'created_at'> | null;
-  tokenMovement: Omit<TokenMovementRow, 'id' | 'created_at'> | null;
-  skipped:       boolean;   // true if source is not decodable or payload malformed
+  signature:        string;
+  movement:         Omit<MovementRow, 'id' | 'processed_at' | 'created_at'> | null;
+  tokenMovement:    Omit<TokenMovementRow, 'id' | 'created_at'> | null;
+  /** whale_address from the token movement decoder — not stored in DB, used for whale_id resolution */
+  whaleAddressHint: string | null;
+  skipped:          boolean;   // true if source is not decodable or payload malformed
 }
 
 // ── Normalize a single raw_transactions row ───────────────────
@@ -51,10 +53,11 @@ export function normalizeRawTx(
   ctx: NormalizationContext,
 ): NormalizedOutput {
   const base: NormalizedOutput = {
-    signature:     row.signature,
-    movement:      null,
-    tokenMovement: null,
-    skipped:       false,
+    signature:        row.signature,
+    movement:         null,
+    tokenMovement:    null,
+    whaleAddressHint: null,
+    skipped:          false,
   };
 
   // Skip sources this decoder can't handle yet (e.g., future sovereign RPC)
@@ -74,6 +77,7 @@ export function normalizeRawTx(
   try {
     const tm = decodeTokenMovement(payload, ctx.whaleAddressSet, ctx.solPriceUsd);
     if (tm) {
+      base.whaleAddressHint = tm.whale_address ?? null;
       const { whale_address: _wa, ...rest } = tm;
       void _wa;
       base.tokenMovement = rest as Omit<TokenMovementRow, 'id' | 'created_at'>;

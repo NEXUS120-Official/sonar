@@ -13,8 +13,8 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient }               from '@/lib/supabase/server';
-import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
-import { parseTokenMovement, type ParsedTokenMovement } from '@/lib/helius/parse-token-movement';
+import { txToRawRow, type RawTxPayload }   from '@/lib/decoder';
+import { normalizeRawTx, type NormalizedOutput } from '@/lib/normalizer';
 import { resolveSolPriceUsd }              from '@/lib/price-engine';
 import { resolveTokenMetadataBatch }       from '@/lib/helius/token-metadata';
 import { sendMessage }                     from '@/lib/telegram/bot';
@@ -62,7 +62,7 @@ async function fetchWhaleAddressSet(): Promise<Set<string>> {
 // ── Persist movements ─────────────────────────────────────────
 
 async function persistMovements(
-  movements: ReturnType<typeof parseMovement>[],
+  movements: (Omit<MovementRow, 'id' | 'processed_at' | 'created_at'> | null)[],
 ): Promise<{ inserted: number; skipped: number }> {
   const valid = movements.filter((m): m is NonNullable<typeof m> => m !== null);
   if (valid.length === 0) return { inserted: 0, skipped: 0 };
@@ -104,20 +104,23 @@ async function persistMovements(
 // ── Persist token movements ───────────────────────────────────
 
 async function persistTokenMovements(
-  tokenMovements: (ParsedTokenMovement | null)[],
+  normalized:            NormalizedOutput[],
   signatureToMovementId: Map<string, string>,
-  sigToWhaleId: Map<string, string>,
+  sigToWhaleId:          Map<string, string>,
 ): Promise<{ inserted: number; skipped: number }> {
-  const valid = tokenMovements.filter((m): m is ParsedTokenMovement => m !== null);
+  const valid = normalized.filter(
+    (out): out is NormalizedOutput & { tokenMovement: NonNullable<NormalizedOutput['tokenMovement']> } =>
+      out.tokenMovement !== null,
+  );
   if (valid.length === 0) return { inserted: 0, skipped: 0 };
 
   const db = createAdminClient();
 
-  // Build a direct whale_address → whale_id map from token movements.
+  // Build a direct whale_address → whale_id map from whaleAddressHint.
   // This covers SWAP txns that don't create a movements row (and therefore
   // don't appear in sigToWhaleId, which is built from movements.whale_id).
   const tmAddresses = [...new Set(
-    valid.map(m => m.whale_address).filter((a): a is string => !!a),
+    valid.map(out => out.whaleAddressHint).filter((a): a is string => !!a),
   )];
 
   const addrToWhaleId = new Map<string, string>(sigToWhaleId); // start with sig-based entries
@@ -132,17 +135,14 @@ async function persistTokenMovements(
     }
   }
 
-  const rows = valid.map((m) => {
-    const movement_id = signatureToMovementId.get(m.signature) ?? null;
+  const rows = valid.map((out) => {
+    const movement_id = signatureToMovementId.get(out.signature) ?? null;
     // Prefer sig-based lookup (most specific), fall back to address-based (covers SWAPs)
-    const whale_id    = sigToWhaleId.get(m.signature)
-      ?? (m.whale_address ? addrToWhaleId.get(m.whale_address) ?? null : null);
+    const whale_id    = sigToWhaleId.get(out.signature)
+      ?? (out.whaleAddressHint ? addrToWhaleId.get(out.whaleAddressHint) ?? null : null);
 
-    // whale_address is a helper field — strip it from the DB row
-    const { whale_address: _wa, ...rest } = m;
-    void _wa;
     return {
-      ...rest,
+      ...out.tokenMovement,
       movement_id,
       whale_id,
     } satisfies Omit<TokenMovementRow, 'id' | 'created_at'>;
@@ -182,7 +182,7 @@ function hotSignalDirection(flowType: string): 'bullish' | 'bearish' | 'neutral'
 }
 
 async function fireHotAlerts(
-  movements: (ReturnType<typeof parseMovement>)[],
+  movements: (Omit<MovementRow, 'id' | 'processed_at' | 'created_at'> | null)[],
   solPrice:  number,
 ): Promise<void> {
   const db = createAdminClient();
@@ -338,22 +338,13 @@ async function fireHotAlerts(
 // Writes raw Helius payloads to raw_transactions before any parsing.
 // This is the immutable append-only log — the foundation of data sovereignty.
 
-async function logRawTransactions(txns: HeliusEnhancedTx[]): Promise<void> {
+async function logRawTransactions(txns: RawTxPayload[]): Promise<void> {
   if (txns.length === 0) return;
   const db = createAdminClient() as any;
 
   const rows = txns
-    .filter(tx => tx?.signature)
-    .map(tx => ({
-      signature:  tx.signature,
-      slot:       (tx as any).slot ?? null,
-      block_time: tx.timestamp ? new Date(tx.timestamp * 1000).toISOString() : null,
-      is_vote:    false,
-      status:     (tx as any).transactionError ? 'failed' : 'success',
-      fee:        tx.fee ?? null,
-      raw_json:   tx,
-      source:     'helius_webhook',
-    }));
+    .filter(tx => (tx as any)?.signature)
+    .map(tx => txToRawRow(tx, 'helius_webhook'));
 
   if (rows.length === 0) return;
 
@@ -389,9 +380,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── 2b. Raw log — fire-and-forget (sovereign data archive) ─
   // Saves the raw Helius payload to raw_transactions before any
-  // parsing or classification. Even failed-to-parse txns are logged.
+  // decoding. Even payloads that decode to null are logged.
   // Non-blocking: never delays the webhook response.
-  logRawTransactions(transactions as HeliusEnhancedTx[]).catch((err) =>
+  const txList = transactions as RawTxPayload[];
+  logRawTransactions(txList).catch((err) =>
     log('warn', 'Raw transaction logging failed', err),
   );
 
@@ -402,32 +394,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   ]);
   log('info', `SOL price: $${solPriceUsd.toFixed(2)}`);
 
-  // ── 4. Classify each transaction ──────────────────────────
-  const txList = transactions as HeliusEnhancedTx[];
-
-  const movements = txList.map((tx) => {
+  // ── 4. Decode + normalize each transaction ─────────────────
+  // decoder → normalizer pipeline: each tx becomes a NormalizedOutput
+  // with movement + tokenMovement ready for product-table upsert.
+  const ctx = { whaleAddressSet: whaleAddresses, solPriceUsd };
+  const normalized: NormalizedOutput[] = txList.map((tx) => {
     try {
-      return parseMovement(tx, whaleAddresses, solPriceUsd);
+      return normalizeRawTx(txToRawRow(tx, 'helius_webhook'), ctx);
     } catch (err) {
-      log('warn', `Failed to parse tx ${tx?.signature ?? 'unknown'}`, err);
-      return null;
+      log('warn', `Failed to normalize tx ${(tx as any)?.signature ?? 'unknown'}`, err);
+      return {
+        signature:        (tx as any)?.signature ?? '',
+        movement:         null,
+        tokenMovement:    null,
+        whaleAddressHint: null,
+        skipped:          true,
+      };
     }
   });
 
-  const tokenMovements = txList.map((tx) => {
-    try {
-      return parseTokenMovement(tx, whaleAddresses, solPriceUsd);
-    } catch (err) {
-      log('warn', `Failed to parse token movement for tx ${tx?.signature ?? 'unknown'}`, err);
-      return null;
-    }
-  });
-
-  const classified = movements.filter((m) => m !== null).length;
-  const tokenClassified = tokenMovements.filter((m) => m !== null).length;
+  const classified      = normalized.filter(out => out.movement !== null).length;
+  const tokenClassified = normalized.filter(out => out.tokenMovement !== null).length;
   log('info', `Classified ${classified}/${transactions.length} movements, ${tokenClassified} token movements`);
 
   // ── 5. Persist movements ───────────────────────────────────
+  const movements = normalized.map(out => out.movement);
   const { inserted, skipped } = await persistMovements(movements);
   log('info', `Persisted ${inserted} movements (${skipped} skipped/duplicate)`);
 
@@ -438,24 +429,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   );
 
   // ── 6. Persist token movements ─────────────────────────────
-  // Build a signature→movement_id map from persisted movements
   let tokenInserted = 0;
   let tokenSkipped  = 0;
 
   if (tokenClassified > 0) {
     // Fetch movement IDs for the signatures we just upserted
     const sigs = txList
-      .map((tx) => tx.signature)
-      .filter((s) => !!s);
+      .map(tx => (tx as any).signature as string)
+      .filter(Boolean);
 
     const db = createAdminClient();
     const { data: movRows } = await db
       .from('movements')
-      .select('id, signature, from_address, to_address, whale_id')
+      .select('id, signature, whale_id')
       .in('signature', sigs);
 
-    const sigToMovId    = new Map<string, string>();
-    const sigToWhaleId  = new Map<string, string>();
+    const sigToMovId   = new Map<string, string>();
+    const sigToWhaleId = new Map<string, string>();
 
     for (const row of movRows ?? []) {
       const r = row as { id: string; signature: string; whale_id: string | null };
@@ -463,18 +453,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (r.whale_id) sigToWhaleId.set(r.signature, r.whale_id);
     }
 
-    const result = await persistTokenMovements(tokenMovements, sigToMovId, sigToWhaleId);
+    const result = await persistTokenMovements(normalized, sigToMovId, sigToWhaleId);
     tokenInserted = result.inserted;
     tokenSkipped  = result.skipped;
     log('info', `Persisted ${tokenInserted} token_movements (${tokenSkipped} skipped/duplicate)`);
 
     // ── 6b. Enrich token_movements with symbol/name (fire-and-forget) ─
-    // Collect unique mints from new movements; resolve metadata and back-fill.
     if (tokenInserted > 0) {
       const newMints = [...new Set(
-        tokenMovements
-          .filter((m): m is ParsedTokenMovement => m !== null)
-          .map(m => m.token_mint),
+        normalized
+          .filter(out => out.tokenMovement !== null)
+          .map(out => out.tokenMovement!.token_mint),
       )];
 
       resolveTokenMetadataBatch(newMints)
@@ -482,7 +471,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const db2 = createAdminClient();
           for (const [mint, meta] of metaMap) {
             if (!meta.symbol && !meta.name) continue;
-            // Update token_movements rows that have null symbol for this mint
             await (db2 as any)
               .from('token_movements')
               .update({ token_symbol: meta.symbol, token_name: meta.name })
