@@ -61,7 +61,7 @@ export async function getSolPriceUsd(): Promise<number> {
 
 async function rpcCall(method: string, params: unknown[]): Promise<unknown> {
   const errors: string[] = [];
-  for (const url of PUBLIC_RPC_URLS) {
+  for (const url of getRpcUrls()) {
     try {
       const res = await fetch(url, {
         method:  'POST',
