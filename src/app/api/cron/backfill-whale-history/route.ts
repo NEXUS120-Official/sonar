@@ -287,6 +287,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       txnsInserted += rows.length;
       log('info', `  Inserted ${rows.length} token_movements`);
 
+      // Archive raw txns to sovereign pipeline (fire-and-forget)
+      const rawRows = inWindow
+        .filter(tx => tx?.signature)
+        .map(tx => ({
+          signature:  tx.signature,
+          slot:       (tx as any).slot ?? null,
+          block_time: tx.timestamp ? new Date(tx.timestamp * 1000).toISOString() : null,
+          is_vote:    false,
+          status:     (tx as any).transactionError ? 'failed' : 'success',
+          fee:        tx.fee ?? null,
+          raw_json:   tx,
+          source:     'helius_backfill',
+        }));
+      (createAdminClient() as any)
+        .from('raw_transactions')
+        .upsert(rawRows, { onConflict: 'signature', ignoreDuplicates: true })
+        .then(() => log('info', `  Archived ${rawRows.length} raw txns`))
+        .catch(() => { /* non-critical */ });
+
       // Enrich token symbols/names (fire-and-forget — same as webhook handler)
       const mints = [...new Set(rows.map(r => r.token_mint))];
       resolveTokenMetadataBatch(mints)
