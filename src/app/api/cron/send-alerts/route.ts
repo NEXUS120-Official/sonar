@@ -268,6 +268,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         free:    freeOk,
         premium: premiumEnabled ? premiumOk : undefined,
       });
+
+      // Record signal outcomes for reputation tracking (fire-and-forget)
+      recordSignalOutcomes(db, alert, solPriceUsd).catch((err) =>
+        log('warn', `recordSignalOutcomes failed for alert ${alert.id}`, err),
+      );
     }
 
     if (freeOk)    sent_free++;

@@ -29,20 +29,21 @@ const IGNORED_MINTS = new Set([
 // ── Result type ────────────────────────────────────────────────
 
 export interface ParsedTokenMovement {
-  movement_id:     null;   // resolved by webhook handler after movement upsert
-  whale_id:        null;   // resolved by webhook handler
+  movement_id:     null;          // resolved by webhook handler after movement upsert
+  whale_id:        null;          // resolved by webhook handler
+  whale_address:   string | null; // known at parse time — used to resolve whale_id
   signature:       string;
   block_time:      string;
   token_mint:      string;
-  token_symbol:    null;   // enriched later
-  token_name:      null;   // enriched later
+  token_symbol:    null;          // enriched later
+  token_name:      null;          // enriched later
   action:          TokenMovementAction;
   amount_token:    number | null;
   amount_sol:      number | null;
   amount_usd:      number | null;
   price_per_token: number | null;
   protocol:        string | null;
-  pool_address:    null;   // enriched later
+  pool_address:    null;          // enriched later
   is_new_token:    false;
 }
 
@@ -177,6 +178,7 @@ export function parseTokenMovement(
   return {
     movement_id:     null,
     whale_id:        null,
+    whale_address:   whaleAddr,
     signature,
     block_time:      blockTime,
     token_mint:      primary.mint,

@@ -30,14 +30,48 @@ function verifyCronSecret(req: NextRequest): boolean {
   return h.replace(/^Bearer\s+/, '') === secret;
 }
 
-// ── In-memory cooldown: 60 min per token ──────────────────────
+// ── Cooldown helpers ───────────────────────────────────────────
+// Primary: DB check (survives cold starts).
+// Secondary: in-memory cache (avoids redundant DB calls within same invocation).
 
+const COOLDOWN_MS    = 60 * 60_000;       // token_accumulation: 60 min
+const SM_COOLDOWN_MS_INNER = 4 * 60 * 60_000; // smart_money_token_buy: 4 h
+
+// In-memory layer (best-effort — resets on cold start, DB is authoritative)
 const _lastFired = new Map<string, number>();
-const COOLDOWN_MS = 60 * 60_000;
 
-function onCooldown(key: string): boolean {
+function inMemoryCooldown(key: string, windowMs: number): boolean {
   const last = _lastFired.get(key) ?? 0;
-  return Date.now() - last < COOLDOWN_MS;
+  return Date.now() - last < windowMs;
+}
+
+// Returns a Set of keys that are still on cooldown according to the DB.
+// key format for token_accumulation:  token_mint
+// key format for smart_money_token_buy: `sm:${whale_id}:${token_mint}`
+async function dbCooldownSet(
+  db: ReturnType<typeof createAdminClient>,
+  alertType: string,
+  windowMs: number,
+): Promise<Set<string>> {
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  const { data } = await (db as any)
+    .from('alerts')
+    .select('data')
+    .eq('alert_type', alertType)
+    .gte('created_at', cutoff);
+
+  const result = new Set<string>();
+  for (const row of (data ?? []) as { data: Record<string, unknown> }[]) {
+    if (alertType === 'token_accumulation') {
+      const mint = row.data?.token_mint as string | undefined;
+      if (mint) result.add(mint);
+    } else if (alertType === 'smart_money_token_buy') {
+      const whale = row.data?.whale_id as string | undefined;
+      const mint  = row.data?.token_mint as string | undefined;
+      if (whale && mint) result.add(`sm:${whale}:${mint}`);
+    }
+  }
+  return result;
 }
 
 // ── POST handler ──────────────────────────────────────────────
@@ -50,6 +84,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const startMs = Date.now();
   const db      = createAdminClient();
   const since   = new Date(Date.now() - 35 * 60_000).toISOString(); // 35min lookback
+
+  // Pre-fetch DB cooldown sets once per run (avoids per-token DB calls)
+  const [accCooldownDb, smCooldownDb] = await Promise.all([
+    dbCooldownSet(db, 'token_accumulation',    COOLDOWN_MS),
+    dbCooldownSet(db, 'smart_money_token_buy', SM_COOLDOWN_MS_INNER),
+  ]);
 
   // ── 1. Load recent token_movements ───────────────────────────
   const { data: movRaw } = await (db as any)
@@ -96,7 +136,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Fires smart_money_token_buy when a tracked smart-money whale buys
   // a token with amount >= $2k (cooldown: 4h per whale+token combo).
   const SM_BUY_THRESHOLD_USD = 2_000;
-  const SM_COOLDOWN_MS       = 4 * 60 * 60_000;
   const smCooldownKey        = (wId: string, mint: string) => `sm:${wId}:${mint}`;
 
   function fmtUsd(v: number): string {
@@ -121,9 +160,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   for (const [, m] of smBuyMap) {
     const cdKey = smCooldownKey(m.whale_id!, m.token_mint);
 
-    // Use the same in-memory cooldown map (keyed differently from token_accumulation)
-    const lastSm = _lastFired.get(cdKey) ?? 0;
-    if (Date.now() - lastSm < SM_COOLDOWN_MS) continue;
+    // DB-authoritative cooldown (cold-start safe) + in-memory fast path
+    if (smCooldownDb.has(cdKey) || inMemoryCooldown(cdKey, SM_COOLDOWN_MS_INNER)) continue;
 
     const whale      = whaleMetaMap.get(m.whale_id!);
     const whaleLabel = whale?.label ?? (whale?.address ? `${whale.address.slice(0, 6)}…` : 'Whale');
@@ -214,7 +252,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 5. Fire token_accumulation alerts ────────────────────────
   for (const sig of signals) {
     const cooldownKey = sig.token_mint;
-    if (onCooldown(cooldownKey)) continue;
+    // DB-authoritative cooldown (cold-start safe) + in-memory fast path
+    if (accCooldownDb.has(cooldownKey) || inMemoryCooldown(cooldownKey, COOLDOWN_MS)) continue;
 
     const { title, body } = formatTokenAccumulationAlert(sig);
 

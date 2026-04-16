@@ -106,18 +106,43 @@ async function persistMovements(
 async function persistTokenMovements(
   tokenMovements: (ParsedTokenMovement | null)[],
   signatureToMovementId: Map<string, string>,
-  whaleAddressToId: Map<string, string>,
+  sigToWhaleId: Map<string, string>,
 ): Promise<{ inserted: number; skipped: number }> {
   const valid = tokenMovements.filter((m): m is ParsedTokenMovement => m !== null);
   if (valid.length === 0) return { inserted: 0, skipped: 0 };
 
   const db = createAdminClient();
 
+  // Build a direct whale_address → whale_id map from token movements.
+  // This covers SWAP txns that don't create a movements row (and therefore
+  // don't appear in sigToWhaleId, which is built from movements.whale_id).
+  const tmAddresses = [...new Set(
+    valid.map(m => m.whale_address).filter((a): a is string => !!a),
+  )];
+
+  const addrToWhaleId = new Map<string, string>(sigToWhaleId); // start with sig-based entries
+  if (tmAddresses.length > 0) {
+    const { data: tmWhales } = await db
+      .from('whales')
+      .select('id, address')
+      .in('address', tmAddresses);
+
+    for (const w of (tmWhales ?? []) as { id: string; address: string }[]) {
+      addrToWhaleId.set(w.address, w.id);
+    }
+  }
+
   const rows = valid.map((m) => {
     const movement_id = signatureToMovementId.get(m.signature) ?? null;
-    const whale_id    = whaleAddressToId.get(m.signature)      ?? null;
+    // Prefer sig-based lookup (most specific), fall back to address-based (covers SWAPs)
+    const whale_id    = sigToWhaleId.get(m.signature)
+      ?? (m.whale_address ? addrToWhaleId.get(m.whale_address) ?? null : null);
+
+    // whale_address is a helper field — strip it from the DB row
+    const { whale_address: _wa, ...rest } = m;
+    void _wa;
     return {
-      ...m,
+      ...rest,
       movement_id,
       whale_id,
     } satisfies Omit<TokenMovementRow, 'id' | 'created_at'>;
