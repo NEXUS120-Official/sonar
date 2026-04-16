@@ -17,6 +17,7 @@ import { BirdeyePriceProvider } from './adapters/birdeye';
 import { GMGNWalletProvider } from './adapters/gmgn';
 import { JupiterPriceProvider } from './adapters/jupiter';
 import { HeliusChainStreamProvider } from './adapters/helius-stream';
+import { SovereignSolanaProvider, SovereignChainStreamProvider } from './adapters/sovereign';
 export { HeliusWebhookProcessor } from './adapters/helius-webhook';
 export type { WebhookProcessingContext, WebhookProcessingReceipt } from './adapters/helius-webhook';
 
@@ -55,11 +56,9 @@ let _gmgn:       WalletIntelProvider | null = null;
 export function getChainStreamProvider(): ChainStreamProvider {
   if (!_stream) {
     const mode = getMode();
-    if (mode === 'sovereign') {
-      // TODO: return new SovereignChainStreamProvider();
-      throw new Error('Sovereign stream provider not yet implemented — set CHAIN_PROVIDER_MODE=external');
-    }
-    _stream = new HeliusChainStreamProvider();
+    _stream = mode === 'sovereign'
+      ? new SovereignChainStreamProvider()
+      : new HeliusChainStreamProvider();
   }
   return _stream;
 }
@@ -72,11 +71,9 @@ export function getChainStreamProvider(): ChainStreamProvider {
 export function getHistoricalProvider(): HistoricalProvider {
   if (!_historical) {
     const mode = getMode();
-    if (mode === 'sovereign') {
-      // TODO: return new SovereignSolanaProvider();
-      throw new Error('Sovereign historical provider not yet implemented — set CHAIN_PROVIDER_MODE=external');
-    }
-    _historical = new HeliusHistoricalProvider();
+    _historical = mode === 'sovereign'
+      ? new SovereignSolanaProvider()
+      : new HeliusHistoricalProvider();
   }
   return _historical;
 }
@@ -112,11 +109,9 @@ export function getFallbackPriceProvider(): PriceProvider {
 export function getWalletIntelProvider(): WalletIntelProvider {
   if (!_walletIntel) {
     const mode = getMode();
-    if (mode === 'sovereign') {
-      // TODO: return new InternalWalletIntelEngine();
-      throw new Error('Sovereign wallet intel engine not yet implemented — set CHAIN_PROVIDER_MODE=external');
-    }
-    _walletIntel = new HeliusWalletProvider();
+    _walletIntel = mode === 'sovereign'
+      ? new SovereignSolanaProvider()
+      : new HeliusWalletProvider();
   }
   return _walletIntel;
 }
@@ -140,7 +135,7 @@ export function getProviderManifest() {
     price:       mode === 'sovereign' ? 'internal_price_engine' : 'birdeye+jupiter',
     wallet_intel: mode === 'sovereign' ? 'internal_intel_engine' : 'helius+gmgn',
     discovery:   'gmgn',
-    sovereign_ready: false,   // flip to true when SovereignSolanaProvider is built
+    sovereign_ready: false,   // flip to true when Agave RPC + Yellowstone are wired
   };
 }
 
