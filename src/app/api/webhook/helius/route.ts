@@ -175,6 +175,12 @@ const HOT_ALERT_COOLDOWN_MS   = 30 * 60_000; // 30-min per-whale cooldown
 // In-memory last-fired map (best-effort in serverless — cron dedup is the safety net)
 const _lastHotAlert = new Map<string, number>();
 
+function hotSignalDirection(flowType: string): 'bullish' | 'bearish' | 'neutral' {
+  if (['exchange_withdrawal', 'defi_deposit', 'unstake'].includes(flowType)) return 'bullish';
+  if (['exchange_deposit', 'defi_withdrawal', 'stake'].includes(flowType))   return 'bearish';
+  return 'neutral';
+}
+
 async function fireHotAlerts(
   movements: (ReturnType<typeof parseMovement>)[],
   solPrice:  number,
@@ -300,6 +306,31 @@ async function fireHotAlerts(
 
     _lastHotAlert.set(cooldownKey, Date.now());
     log('info', `Hot alert fired: ${title} (free=${sendFree && freeOk}, premium=${premOk})`);
+
+    // ── Record signal outcome for reputation tracking ─────────
+    // Only meaningful if there's a known whale — skip neutral non-whale moves.
+    if (whaleId) {
+      try {
+        // Fetch the movement_id for this signature (was just inserted by persistMovements)
+        const { data: movRow } = await db
+          .from('movements')
+          .select('id')
+          .eq('signature', m.signature)
+          .maybeSingle();
+
+        await (db as any).from('whale_signal_outcomes').insert({
+          whale_id:         whaleId,
+          movement_id:      (movRow as any)?.id ?? null,
+          alert_id:         (alertInserted as any).id,
+          signal_direction: hotSignalDirection(m.flow_type),
+          signal_time:      new Date().toISOString(),
+          price_at_signal:  solPrice,
+          resolved:         false,
+        });
+      } catch (err) {
+        log('warn', 'Failed to record signal outcome for hot alert', err);
+      }
+    }
   }
 }
 
