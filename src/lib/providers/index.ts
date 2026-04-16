@@ -16,6 +16,8 @@ import { HeliusHistoricalProvider, HeliusWalletProvider } from './adapters/heliu
 import { BirdeyePriceProvider } from './adapters/birdeye';
 import { GMGNWalletProvider } from './adapters/gmgn';
 import { JupiterPriceProvider } from './adapters/jupiter';
+export { HeliusWebhookProcessor } from './adapters/helius-webhook';
+export type { WebhookProcessingContext, WebhookProcessingReceipt } from './adapters/helius-webhook';
 
 // ── Mode ──────────────────────────────────────────────────────
 
