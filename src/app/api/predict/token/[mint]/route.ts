@@ -23,9 +23,9 @@ function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { mint: string } },
+  { params }: { params: Promise<{ mint: string }> },
 ): Promise<NextResponse> {
-  const { mint } = params;
+  const { mint } = await params;
 
   if (!mint || mint.length < 32) {
     return NextResponse.json({ ok: false, error: 'invalid mint' }, { status: 400 });
