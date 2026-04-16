@@ -11,11 +11,12 @@
 // That way swapping a provider requires changing only this file.
 // ============================================================
 
-import type { HistoricalProvider, PriceProvider, WalletIntelProvider } from './interfaces';
+import type { HistoricalProvider, PriceProvider, WalletIntelProvider, ChainStreamProvider } from './interfaces';
 import { HeliusHistoricalProvider, HeliusWalletProvider } from './adapters/helius';
 import { BirdeyePriceProvider } from './adapters/birdeye';
 import { GMGNWalletProvider } from './adapters/gmgn';
 import { JupiterPriceProvider } from './adapters/jupiter';
+import { HeliusChainStreamProvider } from './adapters/helius-stream';
 export { HeliusWebhookProcessor } from './adapters/helius-webhook';
 export type { WebhookProcessingContext, WebhookProcessingReceipt } from './adapters/helius-webhook';
 
@@ -31,12 +32,37 @@ function getMode(): ProviderMode {
 
 // ── Singletons (module-level, re-used across requests) ────────
 
-let _historical: HistoricalProvider | null = null;
-let _price:      PriceProvider      | null = null;
+let _stream:     ChainStreamProvider  | null = null;
+let _historical: HistoricalProvider  | null = null;
+let _price:      PriceProvider       | null = null;
 let _walletIntel: WalletIntelProvider | null = null;
 let _gmgn:       WalletIntelProvider | null = null;
 
 // ── Factory functions ─────────────────────────────────────────
+
+/**
+ * Pull-model chain stream provider (AsyncIterable<RawTransactionEvent|...>).
+ *
+ * external/hybrid: HeliusChainStreamProvider — satisfies the interface but
+ *   subscribe* methods throw NOT_IMPLEMENTED. Helius is push (webhook); the
+ *   live ingestion path is HeliusWebhookProcessor, not this provider.
+ * sovereign: SovereignChainStreamProvider (Yellowstone/Geyser gRPC) — the
+ *   intended implementation of the pull-stream contract.
+ *
+ * NOTE: do not use this for live ingestion today. Use HeliusWebhookProcessor
+ * directly. This factory exists to make the seam real and sovereign-ready.
+ */
+export function getChainStreamProvider(): ChainStreamProvider {
+  if (!_stream) {
+    const mode = getMode();
+    if (mode === 'sovereign') {
+      // TODO: return new SovereignChainStreamProvider();
+      throw new Error('Sovereign stream provider not yet implemented — set CHAIN_PROVIDER_MODE=external');
+    }
+    _stream = new HeliusChainStreamProvider();
+  }
+  return _stream;
+}
 
 /**
  * Historical on-chain data provider.
@@ -117,6 +143,10 @@ export function getProviderManifest() {
     sovereign_ready: false,   // flip to true when SovereignSolanaProvider is built
   };
 }
+
+// ── Re-export adapters for convenience ───────────────────────
+
+export { HeliusChainStreamProvider } from './adapters/helius-stream';
 
 // ── Re-export interfaces for convenience ─────────────────────
 
