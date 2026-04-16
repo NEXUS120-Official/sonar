@@ -1,8 +1,10 @@
 {
   "functions": {
-    "src/app/api/cron/update-balances/route.ts": { "maxDuration": 300 },
-    "src/app/api/cron/process-flows/route.ts":   { "maxDuration": 60  },
-    "src/app/api/cron/backfill-whale-history/route.ts": { "maxDuration": 120 }
+    "src/app/api/cron/update-balances/route.ts":           { "maxDuration": 300 },
+    "src/app/api/cron/process-flows/route.ts":             { "maxDuration": 60  },
+    "src/app/api/cron/backfill-whale-history/route.ts":    { "maxDuration": 120 },
+    "src/app/api/cron/build-prediction-features/route.ts": { "maxDuration": 60  },
+    "src/app/api/cron/evaluate-predictions/route.ts":      { "maxDuration": 60  }
   },
   "crons": [
     {
@@ -40,6 +42,18 @@
     {
       "path": "/api/cron/backfill-whale-history",
       "schedule": "0 */12 * * *"
+    },
+    {
+      "path": "/api/cron/build-prediction-features",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/evaluate-predictions",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/cron/seed-entities",
+      "schedule": "0 4 * * *"
     }
   ]
 }
