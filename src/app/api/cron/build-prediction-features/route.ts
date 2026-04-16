@@ -170,6 +170,93 @@ function computeFeatures(
   };
 }
 
+// ── Logistic prediction model (v1) ───────────────────────────
+//
+// Weights derived from signal importance in the Bias Index:
+//   exchange flow  35% — primary signal (negative = bullish, accumulation)
+//   staking        20% — defensive/offensive positioning
+//   smart money    15% — track record weighted
+//   stablecoin     10% — capital deployment readiness
+//   DeFi rotation  10% — risk-on indicator
+//   concentration  10% — whale coordination signal
+//
+// Score range: [-100, +100], positive = bullish.
+// P_up = 1 / (1 + exp(-k × score)), k = 0.011.
+
+const MODEL_VERSION = 'logistic_v1';
+
+interface PredictionOutput {
+  prob_up:      number;   // [0, 1]
+  prob_down:    number;   // [0, 1]
+  prob_flat:    number;   // [0, 1]
+  direction:    number;   // +1 | 0 | -1
+  confidence:   number;   // 0–100
+  top_features: Record<string, number>;
+}
+
+function runModel(f: FeatureVector): PredictionOutput {
+  const CAP    = 100_000_000; // $100M normalisation cap
+  const K      = 0.011;       // logistic steepness
+
+  // Normalise each component to [-1, +1]
+  const exchNorm  = Math.max(-1, Math.min(1, -f.exchange_net_flow_usd / CAP));  // negative = bullish
+  const stakeNorm = Math.max(-1, Math.min(1, f.staking_net_flow_usd   / CAP));  // unstaking = bullish
+  const smNorm    = f.smart_money_net_bias;                                      // already [-1, 1]
+  const stabNorm  = Math.max(-1, Math.min(1, f.stablecoin_deploy_usd  / CAP));
+  const defiNorm  = f.defi_rotation_score;                                       // already [-1, 1]
+  const concNorm  = Math.max(-1, Math.min(1, f.large_wallet_concentration / 10));
+
+  // Weighted blend
+  const rawScore =
+    exchNorm  * 0.35 +
+    stakeNorm * 0.20 +
+    smNorm    * 0.15 +
+    stabNorm  * 0.10 +
+    defiNorm  * 0.10 +
+    concNorm  * 0.10;
+
+  // Scale to [-100, +100]
+  const score   = rawScore * 100;
+  const prob_up = 1 / (1 + Math.exp(-K * score));
+
+  // Clamp to avoid extreme certainty
+  const prob_up_clamped   = Math.max(0.30, Math.min(0.85, prob_up));
+  const prob_down_clamped = Math.max(0.10, Math.min(0.55, 1 - prob_up_clamped));
+  const prob_flat         = Math.max(0, 1 - prob_up_clamped - prob_down_clamped);
+
+  const direction =
+    prob_up_clamped > 0.55 ? 1  :
+    prob_down_clamped > 0.45 ? -1 : 0;
+
+  // How many components agree with the predicted direction
+  const components = [exchNorm, stakeNorm, smNorm, stabNorm, defiNorm, concNorm];
+  const aligned = components.filter(c =>
+    direction === 1  ? c > 0.05  :
+    direction === -1 ? c < -0.05 :
+    Math.abs(c) < 0.05,
+  ).length;
+  const confidence = Math.min(100, Math.round(40 + aligned * 10));
+
+  const top_features: Record<string, number> = {
+    exchange_flow:    Math.round(exchNorm  * 100) / 100,
+    staking_flow:     Math.round(stakeNorm * 100) / 100,
+    smart_money:      Math.round(smNorm    * 100) / 100,
+    stablecoin_deploy: Math.round(stabNorm * 100) / 100,
+    defi_rotation:    Math.round(defiNorm  * 100) / 100,
+    whale_concentration: Math.round(concNorm * 100) / 100,
+    raw_score:        Math.round(score * 10) / 10,
+  };
+
+  return {
+    prob_up:   Math.round(prob_up_clamped * 10000) / 10000,
+    prob_down: Math.round(prob_down_clamped * 10000) / 10000,
+    prob_flat: Math.round(prob_flat * 10000) / 10000,
+    direction,
+    confidence,
+    top_features,
+  };
+}
+
 // ── 72h aggregate: sum 3 × 24h snapshots ─────────────────────
 
 function aggregate72h(snapshots24h: FlowSnapshotRow[]): FlowSnapshotRow {
@@ -288,26 +375,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   featureTime.setMinutes(0, 0, 0);
 
   let inserted = 0;
+  let runs_inserted = 0;
   const errors: string[] = [];
 
-  // ── 4a. 4h horizon ───────────────────────────────────────────
-  if (snaps4h.length > 0) {
-    const snap    = snaps4h[0];
-    const prev    = snaps4h[1] ?? null;
+  // ── Helper: upsert features + run model + write prediction_run ─
+  async function processHorizon(
+    horizon: string,
+    snap: FlowSnapshotRow,
+    prev: FlowSnapshotRow | null,
+  ): Promise<void> {
     const features = computeFeatures(snap, prev, latestBias);
 
     const { error: upsertErr } = await dbAny
       .from('prediction_features')
       .upsert({
         feature_time:               featureTime.toISOString(),
-        horizon:                    '4h',
+        horizon,
         exchange_net_flow_usd:      features.exchange_net_flow_usd,
         staking_net_flow_usd:       features.staking_net_flow_usd,
         staking_velocity:           features.staking_velocity,
         stablecoin_deploy_usd:      features.stablecoin_deploy_usd,
         defi_rotation_score:        features.defi_rotation_score,
         large_wallet_concentration: features.large_wallet_concentration,
-        cluster_activity_score:     null,  // reserved for wallet cluster pass
+        cluster_activity_score:     null,
         smart_money_net_bias:       features.smart_money_net_bias,
         bias_score:                 features.bias_score,
         bias_confidence:            features.bias_confidence,
@@ -315,78 +405,64 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }, { onConflict: 'feature_time,horizon', ignoreDuplicates: false });
 
     if (upsertErr) {
-      errors.push(`4h upsert failed: ${upsertErr.message}`);
-      log('error', '4h upsert failed', upsertErr.message);
-    } else {
-      inserted++;
-      log('info', `4h: exchange_net=$${features.exchange_net_flow_usd.toFixed(0)} staking_net=$${features.staking_net_flow_usd.toFixed(0)} bias=${features.bias_score}`);
+      errors.push(`${horizon} features upsert failed: ${upsertErr.message}`);
+      log('error', `${horizon} features upsert failed`, upsertErr.message);
+      return;
     }
+
+    inserted++;
+
+    // Run logistic model
+    const pred = runModel(features);
+    log('info', `${horizon}: score=${pred.top_features.raw_score} dir=${pred.direction} p_up=${pred.prob_up} conf=${pred.confidence}`);
+
+    // Write prediction_run (ignore duplicate for same feature_time+horizon+model)
+    const { error: runErr } = await dbAny
+      .from('prediction_runs')
+      .insert({
+        model_name:   MODEL_VERSION,
+        model_version: '1.0.0',
+        horizon,
+        feature_time: featureTime.toISOString(),
+        prob_up:      pred.prob_up,
+        prob_down:    pred.prob_down,
+        prob_flat:    pred.prob_flat,
+        direction:    pred.direction,
+        confidence:   pred.confidence,
+        top_features: pred.top_features,
+        predictions:  { ...pred, features: features.features_json },
+        // evaluated fields filled later by evaluate-predictions cron
+        actual_direction: null,
+        correct:          null,
+        evaluated_at:     null,
+      });
+
+    if (runErr) {
+      // Duplicate (same hour already ran) is fine — ignore
+      if (!runErr.message.includes('duplicate') && !runErr.message.includes('unique')) {
+        errors.push(`${horizon} prediction_run insert failed: ${runErr.message}`);
+        log('warn', `${horizon} prediction_run insert failed`, runErr.message);
+      }
+    } else {
+      runs_inserted++;
+    }
+  }
+
+  // ── 4a. 4h horizon ───────────────────────────────────────────
+  if (snaps4h.length > 0) {
+    await processHorizon('4h', snaps4h[0], snaps4h[1] ?? null);
   }
 
   // ── 4b. 24h horizon ──────────────────────────────────────────
   if (snaps24h.length > 0) {
-    const snap    = snaps24h[0];
-    const prev    = snaps24h[1] ?? null;
-    const features = computeFeatures(snap, prev, latestBias);
-
-    const { error: upsertErr } = await dbAny
-      .from('prediction_features')
-      .upsert({
-        feature_time:               featureTime.toISOString(),
-        horizon:                    '24h',
-        exchange_net_flow_usd:      features.exchange_net_flow_usd,
-        staking_net_flow_usd:       features.staking_net_flow_usd,
-        staking_velocity:           features.staking_velocity,
-        stablecoin_deploy_usd:      features.stablecoin_deploy_usd,
-        defi_rotation_score:        features.defi_rotation_score,
-        large_wallet_concentration: features.large_wallet_concentration,
-        cluster_activity_score:     null,
-        smart_money_net_bias:       features.smart_money_net_bias,
-        bias_score:                 features.bias_score,
-        bias_confidence:            features.bias_confidence,
-        features_json:              features.features_json,
-      }, { onConflict: 'feature_time,horizon', ignoreDuplicates: false });
-
-    if (upsertErr) {
-      errors.push(`24h upsert failed: ${upsertErr.message}`);
-      log('error', '24h upsert failed', upsertErr.message);
-    } else {
-      inserted++;
-      log('info', `24h: exchange_net=$${features.exchange_net_flow_usd.toFixed(0)} bias=${features.bias_score}`);
-    }
+    await processHorizon('24h', snaps24h[0], snaps24h[1] ?? null);
   }
 
   // ── 4c. 72h horizon (aggregate 3 × 24h) ─────────────────────
   if (snaps24h.length >= 3) {
-    const snap72h   = aggregate72h(snaps24h.slice(0, 3));
-    const prev72h   = snaps24h.length >= 4 ? aggregate72h(snaps24h.slice(1, 4)) : null;
-    const features  = computeFeatures(snap72h, prev72h, latestBias);
-
-    const { error: upsertErr } = await dbAny
-      .from('prediction_features')
-      .upsert({
-        feature_time:               featureTime.toISOString(),
-        horizon:                    '72h',
-        exchange_net_flow_usd:      features.exchange_net_flow_usd,
-        staking_net_flow_usd:       features.staking_net_flow_usd,
-        staking_velocity:           features.staking_velocity,
-        stablecoin_deploy_usd:      features.stablecoin_deploy_usd,
-        defi_rotation_score:        features.defi_rotation_score,
-        large_wallet_concentration: features.large_wallet_concentration,
-        cluster_activity_score:     null,
-        smart_money_net_bias:       features.smart_money_net_bias,
-        bias_score:                 features.bias_score,
-        bias_confidence:            features.bias_confidence,
-        features_json:              features.features_json,
-      }, { onConflict: 'feature_time,horizon', ignoreDuplicates: false });
-
-    if (upsertErr) {
-      errors.push(`72h upsert failed: ${upsertErr.message}`);
-      log('error', '72h upsert failed', upsertErr.message);
-    } else {
-      inserted++;
-      log('info', `72h (aggregate 3×24h): exchange_net=$${features.exchange_net_flow_usd.toFixed(0)} bias=${features.bias_score}`);
-    }
+    const snap72h  = aggregate72h(snaps24h.slice(0, 3));
+    const prev72h  = snaps24h.length >= 4 ? aggregate72h(snaps24h.slice(1, 4)) : null;
+    await processHorizon('72h', snap72h, prev72h);
   } else {
     log('info', `72h skipped — only ${snaps24h.length} 24h snapshots available (need ≥3)`);
   }
@@ -395,11 +471,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   log('info', `Done — inserted/updated=${inserted} errors=${errors.length} duration=${duration}ms`);
 
   return NextResponse.json({
-    ok:          errors.length === 0,
-    feature_time: featureTime.toISOString(),
-    inserted,
-    errors:      errors.slice(0, 5),
-    duration_ms: duration,
+    ok:            errors.length === 0,
+    feature_time:  featureTime.toISOString(),
+    features_inserted: inserted,
+    runs_inserted,
+    errors:        errors.slice(0, 5),
+    duration_ms:   duration,
   });
 }
 
