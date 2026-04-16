@@ -21,11 +21,15 @@ const LAMPORTS_PER_SOL    = 1_000_000_000;
 const COINGECKO_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
 const BINANCE_PRICE_URL   = 'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT';
 
-// Public Solana mainnet — free, zero credits, rate-limited to ~10 req/s
-const PUBLIC_RPC_URLS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-mainnet.g.alchemy.com/v2/demo',
-];
+// RPC endpoint list — built at call time so HELIUS_API_KEY is available.
+// Priority: Helius free RPC (zero DAS credits) → public Solana mainnet fallback.
+function getRpcUrls(): string[] {
+  const key = process.env.HELIUS_API_KEY;
+  const urls: string[] = [];
+  if (key) urls.push(`https://mainnet.helius-rpc.com/?api-key=${key}`);
+  urls.push('https://api.mainnet-beta.solana.com');
+  return urls;
+}
 
 // ── SOL price ─────────────────────────────────────────────────
 
