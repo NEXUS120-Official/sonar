@@ -1,12 +1,11 @@
 // ============================================================
 // SONAR v2.0 — Whale Balance Checker
 // ============================================================
-// Uses the PUBLIC Solana RPC (zero Helius credits) for balance
-// checks — getAccountInfo for SOL, getTokenAccountsByOwner for USDC.
-// total_value_usd = sol_balance * sol_price + usdc_balance.
+// Uses Helius RPC for balance checks — getAccountInfo for SOL,
+// getTokenAccountsByOwner for USDC. Falls back to public Solana RPC.
 //
-// This replaces the previous DAS getAssetsByOwner approach which
-// cost 10 Helius credits per call (94 whales/hour = 676K credits/month).
+// Standard RPC calls cost ~1 Helius credit each (vs 10 for DAS).
+// 94 whales × 2 calls × 24h = ~135K credits/month (within 1M limit).
 //
 // Qualification threshold: $500K total value.
 // ============================================================
@@ -20,11 +19,14 @@ const LAMPORTS_PER_SOL    = 1_000_000_000;
 const COINGECKO_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
 const BINANCE_PRICE_URL   = 'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT';
 
-// Public Solana RPC — free, no credits, rate-limited to ~10 req/s
-const PUBLIC_RPC_URLS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-mainnet.g.alchemy.com/v2/demo', // Alchemy public demo
-];
+// RPC endpoint list — Helius first (high rate-limit), public mainnet as fallback.
+function getRpcUrls(): string[] {
+  const heliusKey = process.env.HELIUS_API_KEY;
+  const urls: string[] = [];
+  if (heliusKey) urls.push(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`);
+  urls.push('https://api.mainnet-beta.solana.com');
+  return urls;
+}
 
 // ── SOL price ─────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ export async function getSolPriceUsd(): Promise<number> {
 
 async function rpcCall(method: string, params: unknown[]): Promise<unknown> {
   const errors: string[] = [];
-  for (const url of PUBLIC_RPC_URLS) {
+  for (const url of getRpcUrls()) {
     try {
       const res = await fetch(url, {
         method:  'POST',
@@ -119,11 +121,15 @@ export interface PortfolioValue {
 }
 
 /**
- * Fetch SOL + USDC balances using the public Solana RPC (zero Helius credits).
+ * Fetch SOL + USDC balances via Helius RPC (falls back to public Solana mainnet).
+ * Pass solPriceUsd to avoid a redundant price fetch when called in a loop.
  * total_value_usd = sol * sol_price + usdc.
  */
-export async function getPortfolioValue(address: string): Promise<PortfolioValue> {
-  const solPrice = await getSolPriceUsd();
+export async function getPortfolioValue(
+  address: string,
+  solPriceUsd?: number,
+): Promise<PortfolioValue> {
+  const solPrice = solPriceUsd ?? await getSolPriceUsd();
 
   const [sol_balance, usdc_balance] = await Promise.all([
     getSolBalance(address),

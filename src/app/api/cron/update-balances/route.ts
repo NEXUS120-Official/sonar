@@ -117,7 +117,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
       log('info', `Updating ${whale.address} (${whale.label ?? 'unlabeled'})`);
 
-      const portfolio = await getPortfolioValue(whale.address);
+      const portfolio = await getPortfolioValue(whale.address, sol_price_usd);
       const { sol_balance, usdc_balance, total_value_usd } = portfolio;
 
       const { error: updateErr } = await dbAny
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     for (const whale of inactive) {
       try {
-        const portfolio = await getPortfolioValue(whale.address);
+        const portfolio = await getPortfolioValue(whale.address, sol_price_usd);
         const { sol_balance, usdc_balance, total_value_usd } = portfolio;
 
         const update: Record<string, unknown> = {
