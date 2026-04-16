@@ -22,6 +22,7 @@ const NAV = [
   { href: '/dashboard/whale-copy-signals', label: 'Copy Signals',    icon: '⟳' },
   { href: '/dashboard/lp-monitor',         label: 'LP Monitor',      icon: '⬟' },
   { href: '/dashboard/price-prediction',   label: 'Price Intel',     icon: '◬' },
+  { href: '/dashboard/predictions',        label: 'Predictions',     icon: '⟁' },
   { href: '/dashboard/alerts',             label: 'Alerts',          icon: '⚡' },
   { href: '/dashboard/settings',           label: 'Settings',        icon: '⚙' },
 ];
