@@ -51,7 +51,7 @@ export async function GET(): Promise<NextResponse> {
     db2
       .from('whales')
       .select('id, is_active, balance_updated_at')
-      .order('balance_updated_at', { ascending: false })
+      .order('balance_updated_at', { ascending: false, nullsFirst: false })
       .limit(200) as Promise<{ data: { id: string; is_active: boolean; balance_updated_at: string | null }[] | null }>,
 
     // Last alert
