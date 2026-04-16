@@ -29,6 +29,7 @@ import { calculateBiasIndex }                from '@/lib/signal-engine';
 import { detectAnomalies, type AlertInsert } from '@/lib/signal-engine';
 import { type RecentAlertMap }               from '@/lib/signal-engine';
 import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
+import { buildPredictionFeatures }           from '@/lib/feature-builder';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
 import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistoryRow } from '@/lib/supabase/types';
 
@@ -157,10 +158,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 2. Aggregate snapshots for all windows ──────────────────
   const now = new Date();
   const snapshots: SnapshotInsert[] = [];
+  let movements4h: MovementRow[] = [];  // captured for feature-builder
 
   for (const windowHours of SNAPSHOT_WINDOWS) {
     try {
       const windowMovements = filterToWindow(movements, windowHours);
+      if (windowHours === 4) movements4h = windowMovements;
       const snapshot = aggregateMovements(windowMovements, windowHours as SnapshotWindow, now);
       snapshots.push(snapshot);
     } catch (err) {
@@ -217,9 +220,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── 4b. Save Bias Index History (4h window) ────────────────
+  // biasResult is lifted to outer scope so the feature-builder can use it.
+  let biasResult: ReturnType<typeof calculateBiasIndex> | null = null;
+
   if (snapshot4h) {
     try {
-      // Fetch smart money ratio for confirmation weighting
       const { data: smData } = await db
         .from('whales')
         .select('smart_money_flag')
@@ -230,14 +235,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const smCount = smAll.filter(w => w.smart_money_flag === true).length;
       const smRatio = smAll.length > 0 ? smCount / smAll.length : 0.5;
 
-      const biasResult = calculateBiasIndex({
+      biasResult = calculateBiasIndex({
         sol_net_exchange_flow_usd: snapshot4h.sol_net_exchange_flow_usd,
         net_staking_flow_usd:      snapshot4h.net_staking_flow_usd,
         net_usdc_flow_usd:         snapshot4h.net_usdc_flow_usd,
         net_defi_flow_usd:         snapshot4h.net_defi_flow_usd,
         smart_money_ratio:         smRatio,
       });
-      // bias_index_history not in auto-generated schema — cast required
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (db as any).from('bias_index_history').insert({
         score:      biasResult.score,
@@ -248,6 +252,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       log('info', `Bias index saved: ${biasResult.score} (${biasResult.bias})`);
     } catch (err) {
       log('warn', `Bias index history save failed: ${String(err)}`);
+    }
+  }
+
+  // ── 4c. Build prediction features ──────────────────────────
+  // Derives and upserts prediction_features rows for all horizons.
+  // Non-critical: wrapped in try/catch so a failure never kills the cron.
+  if (snapshot4h && biasResult) {
+    try {
+      const featureReceipt = await buildPredictionFeatures(
+        {
+          snapshot:       snapshot4h,
+          baseline,
+          movements4h,
+          biasScore:      biasResult.score,
+          biasLabel:      biasResult.bias,
+          biasConfidence: biasResult.confidence,
+        },
+        db,
+      );
+      log('info', `Prediction features written: ${featureReceipt.written} rows (${featureReceipt.horizons.join(', ')}) @ ${featureReceipt.feature_time}`);
+    } catch (err) {
+      log('warn', `Feature builder failed (non-critical): ${String(err)}`);
     }
   }
 
