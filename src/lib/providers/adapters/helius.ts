@@ -68,7 +68,7 @@ export class HeliusHistoricalProvider implements HistoricalProvider {
     return txns.map(tx => ({
       signature:  tx.signature,
       block_time: new Date(tx.timestamp * 1000),
-      slot:       tx.slot ?? 0,
+      slot:       (tx as any).slot ?? 0,
       raw:        tx,
       source:     'helius',
     }));
@@ -89,13 +89,14 @@ export class HeliusHistoricalProvider implements HistoricalProvider {
     const data = (await res.json()) as HeliusEnhancedTx[];
     const tx   = data[0];
     if (!tx) return null;
+    const txAny = tx as any;
 
     return {
       signature:  tx.signature,
-      slot:       tx.slot ?? 0,
+      slot:       txAny.slot ?? 0,
       block_time: new Date(tx.timestamp * 1000),
       fee:        tx.fee ?? 0,
-      success:    !tx.transactionError,
+      success:    !txAny.transactionError,
       raw:        tx,
       source:     'helius',
     };
@@ -129,15 +130,17 @@ export class HeliusHistoricalProvider implements HistoricalProvider {
 
       for (const sig of batch) {
         const tx = bySignature.get(sig);
-        results.push(tx ? {
+        if (!tx) { results.push(null); continue; }
+        const txAny = tx as any;
+        results.push({
           signature:  tx.signature,
-          slot:       tx.slot ?? 0,
+          slot:       txAny.slot ?? 0,
           block_time: new Date(tx.timestamp * 1000),
           fee:        tx.fee ?? 0,
-          success:    !tx.transactionError,
+          success:    !txAny.transactionError,
           raw:        tx,
           source:     'helius',
-        } : null);
+        });
       }
 
       if (i + BATCH < signatures.length) {
