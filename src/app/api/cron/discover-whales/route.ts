@@ -219,7 +219,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     log('info', `Checking ${candidate.address} (withdrew $${candidate.amount_usd?.toFixed(0) ?? '?'} from ${candidate.exchange ?? 'unknown'})`);
 
     try {
-      const qual = await checkWhaleQualification(candidate.address, solPrice);
+      const qual = await checkWhaleQualification(candidate.address);
 
       if (!qual) {
         log('info', `  Below threshold — skipping`);
