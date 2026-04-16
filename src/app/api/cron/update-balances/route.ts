@@ -80,7 +80,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     sol_price_usd = await getSolPriceUsd();
   } catch (err) {
     log('warn', 'SOL price fetch failed', err);
-    sol_price_usd = 130;
+    sol_price_usd = 85;
   }
 
   // ── 2. Load active whales ───────────────────────────────────
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .from('whales')
     .select('id, address, label')
     .eq('is_active', true)
-    .limit(200);
+    .limit(100);   // 100 × 400ms = 40s — within maxDuration:60
 
   if (whaleErr) {
     log('error', 'Failed to load whales', whaleErr);

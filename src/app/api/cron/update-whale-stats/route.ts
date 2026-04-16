@@ -81,7 +81,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? Math.round((agg.returns.reduce((s, v) => s + v, 0) / agg.returns.length) * 10000) / 10000
       : 0;
     const repScore    = computeReputation(hitRate, agg.total);
-    const smartMoney  = hitRate >= 0.65 && agg.total >= 5;
+    const smartMoney  = hitRate > 0.62 && agg.total >= 10;
 
     if (smartMoney) smartMoneyCount++;
 

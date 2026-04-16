@@ -46,7 +46,7 @@ const PRICE_SOURCES = [
 // ── Fallback / config ─────────────────────────────────────────
 
 /** Hardcoded fallback used when the live price API is unavailable. */
-export const SOL_PRICE_FALLBACK_USD = 130;
+export const SOL_PRICE_FALLBACK_USD = 85;
 
 /** Cache entry is considered fresh for this many ms. */
 const CACHE_TTL_MS = 15 * 60 * 1000;  // 15 min

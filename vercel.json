@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "src/app/api/cron/update-balances/route.ts": { "maxDuration": 300 },
+    "src/app/api/cron/process-flows/route.ts":   { "maxDuration": 60  },
+    "src/app/api/cron/backfill-whale-history/route.ts": { "maxDuration": 120 }
+  },
   "crons": [
     {
       "path": "/api/cron/process-flows",
@@ -31,10 +36,6 @@
     {
       "path": "/api/cron/detect-token-signals",
       "schedule": "*/2 * * * *"
-    },
-    {
-      "path": "/api/cron/resolve-signal-outcomes",
-      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/backfill-whale-history",

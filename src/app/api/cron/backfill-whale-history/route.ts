@@ -20,6 +20,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { parseTokenMovement } from '@/lib/helius/parse-token-movement';
+import { resolveTokenMetadataBatch } from '@/lib/helius/token-metadata';
 import { getSolPriceUsd } from '@/lib/whale-discovery/balance-checker';
 import type { HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 import type { WhaleRow, TokenMovementRow } from '@/lib/supabase/types';
@@ -285,6 +286,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       txnsInserted += rows.length;
       log('info', `  Inserted ${rows.length} token_movements`);
+
+      // Enrich token symbols/names (fire-and-forget — same as webhook handler)
+      const mints = [...new Set(rows.map(r => r.token_mint))];
+      resolveTokenMetadataBatch(mints)
+        .then(async (metaMap) => {
+          const db2 = createAdminClient();
+          for (const [mint, meta] of metaMap) {
+            if (!meta.symbol && !meta.name) continue;
+            await (db2 as any)
+              .from('token_movements')
+              .update({ token_symbol: meta.symbol, token_name: meta.name })
+              .eq('token_mint', mint)
+              .is('token_symbol', null);
+          }
+        })
+        .catch(() => { /* non-critical */ });
 
     } catch (err) {
       const msg = `Backfill failed for ${whale.address}: ${String(err)}`;
