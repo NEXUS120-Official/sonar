@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/resolve-signal-outcomes",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/backfill-whale-history",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
