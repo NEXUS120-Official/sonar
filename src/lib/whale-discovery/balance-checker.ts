@@ -12,9 +12,9 @@ import { USDC_MINT, FLOW_THRESHOLDS } from '@/lib/utils/constants';
 // ── Constants ─────────────────────────────────────────────────
 
 const LAMPORTS_PER_SOL      = 1_000_000_000;
-const SOL_PRICE_FALLBACK    = 130;
-const SOL_NATIVE_ADDRESS    = 'So11111111111111111111111111111111111111112';
-const JUPITER_PRICE_URL     = `https://api.jup.ag/price/v2?ids=${SOL_NATIVE_ADDRESS}`;
+const SOL_PRICE_FALLBACK    = 120;
+const COINGECKO_PRICE_URL   = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd';
+const BINANCE_PRICE_URL     = 'https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT';
 
 // ── Helius RPC ────────────────────────────────────────────────
 
@@ -73,22 +73,31 @@ export async function getUsdcBalance(address: string): Promise<number> {
 }
 
 export async function getSolPriceUsd(): Promise<number> {
+  // Primary: CoinGecko
   try {
-    const res = await fetch(JUPITER_PRICE_URL, {
+    const res = await fetch(COINGECKO_PRICE_URL, {
       headers: { Accept: 'application/json' },
       signal:  AbortSignal.timeout(8_000),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = (await res.json()) as {
-      data: Record<string, { price: string }>;
-    };
-    const priceStr = json.data[SOL_NATIVE_ADDRESS]?.price;
-    const price    = priceStr ? parseFloat(priceStr) : 0;
-    if (price > 0) return price;
-    throw new Error('Zero price returned');
+    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
+    const json = (await res.json()) as { solana: { usd: number } };
+    const price = json?.solana?.usd;
+    if (price && price > 0) return price;
+    throw new Error('CoinGecko: bad response');
   } catch {
-    return SOL_PRICE_FALLBACK;
+    // Fallback: Binance
+    try {
+      const res = await fetch(BINANCE_PRICE_URL, {
+        headers: { Accept: 'application/json' },
+        signal:  AbortSignal.timeout(6_000),
+      });
+      if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
+      const json = (await res.json()) as { price: string };
+      const price = parseFloat(json?.price ?? '0');
+      if (price > 0) return price;
+    } catch { /* fall through */ }
   }
+  return SOL_PRICE_FALLBACK;
 }
 
 // ── Qualification check ───────────────────────────────────────
