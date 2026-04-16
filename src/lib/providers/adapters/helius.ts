@@ -23,7 +23,8 @@ import type {
   SubscribeTransactionsOptions,
 } from '../interfaces';
 import { ProviderError } from '../interfaces';
-import { getBatchSolBalances, getUsdcBalance, getSolPriceUsd } from '@/lib/whale-discovery/balance-checker';
+import { getBatchSolBalances, getUsdcBalance } from '@/lib/whale-discovery/balance-checker';
+import { resolveSolPriceUsd } from '@/lib/price-engine';
 import type { HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 
 // ── Config ────────────────────────────────────────────────────
@@ -158,7 +159,7 @@ export class HeliusWalletProvider implements WalletIntelProvider {
   readonly name = 'helius';
 
   async getWalletBalances(address: string): Promise<WalletBalances> {
-    const solPrice = await getSolPriceUsd();
+    const solPrice = await resolveSolPriceUsd();
     const [solMap, usdc_balance] = await Promise.all([
       getBatchSolBalances([address]),
       getUsdcBalance(address),

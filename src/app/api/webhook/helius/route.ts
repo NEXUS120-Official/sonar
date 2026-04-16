@@ -15,7 +15,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient }               from '@/lib/supabase/server';
 import { parseMovement, type HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 import { parseTokenMovement, type ParsedTokenMovement } from '@/lib/helius/parse-token-movement';
-import { getCachedSolPrice }               from '@/lib/helius/sol-price-cache';
+import { resolveSolPriceUsd }              from '@/lib/price-engine';
 import { resolveTokenMetadataBatch }       from '@/lib/helius/token-metadata';
 import { sendMessage }                     from '@/lib/telegram/bot';
 import { formatFlowAlert }                 from '@/lib/telegram/formatter';
@@ -398,7 +398,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 3. Fetch live SOL price + whale addresses in parallel ─
   const [whaleAddresses, solPriceUsd] = await Promise.all([
     fetchWhaleAddressSet(),
-    getCachedSolPrice(),
+    resolveSolPriceUsd(),
   ]);
   log('info', `SOL price: $${solPriceUsd.toFixed(2)}`);
 

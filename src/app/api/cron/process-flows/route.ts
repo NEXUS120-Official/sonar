@@ -23,14 +23,14 @@ import {
   windowCutoff,
   type SnapshotInsert,
   type SnapshotWindow,
-} from '@/lib/flow-engine/aggregator';
-import { calculateBiasIndex } from '@/lib/flow-engine/bias-index';
-import { detectAnomalies, type AlertInsert } from '@/lib/flow-engine/anomaly-detector';
-import { type RecentAlertMap }               from '@/lib/flow-engine/dedup';
+  type FlowMetrics,
+} from '@/lib/signal-engine';
+import { calculateBiasIndex }                from '@/lib/signal-engine';
+import { detectAnomalies, type AlertInsert } from '@/lib/signal-engine';
+import { type RecentAlertMap }               from '@/lib/signal-engine';
 import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
 import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistoryRow } from '@/lib/supabase/types';
-import type { FlowMetrics } from '@/lib/flow-engine/aggregator';
 
 // ── Logging ───────────────────────────────────────────────────
 

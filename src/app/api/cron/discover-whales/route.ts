@@ -21,10 +21,8 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import {
-  checkWhaleQualification,
-  getSolPriceUsd,
-} from '@/lib/whale-discovery/balance-checker';
+import { checkWhaleQualification } from '@/lib/whale-discovery/balance-checker';
+import { resolveSolPriceUsdWithArchive } from '@/lib/price-engine';
 import { getGMGNProvider } from '@/lib/providers';
 import { FLOW_THRESHOLDS } from '@/lib/utils/constants';
 import type { MovementRow, WhaleRow } from '@/lib/supabase/types';
@@ -116,7 +114,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── 1. Fetch SOL price ──────────────────────────────────────
   try {
-    solPrice = await getSolPriceUsd();
+    solPrice = await resolveSolPriceUsdWithArchive(db);
     log('info', `SOL price: $${solPrice}`);
   } catch (err) {
     log('warn', 'SOL price fetch failed — using fallback $85', err);

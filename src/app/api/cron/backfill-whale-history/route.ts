@@ -4,34 +4,40 @@
 // ============================================================
 // Runs every 6 hours. For newly discovered whales (added within
 // the last 7 days) that have no token_movements yet, fetches
-// their last 90 days of SWAP/LP transactions via Helius Enhanced
-// Transactions API and inserts them into token_movements.
+// their last 90 days of SWAP/LP transactions and inserts them
+// into token_movements.
 //
 // This gives new whales an immediate history so reputation
 // scoring, copy signals, and DEX intelligence have data from day 1.
 //
+// Pipeline:
+//   ingest-rpc        → fetches Helius history + archives raw_transactions
+//   normalizer        → decodes raw payloads into typed movement records
+//   product upsert    → writes token_movements with whale_id
+//   metadata enrich   → back-fills token symbol/name (fire-and-forget)
+//
 // Design:
-//   - Max 5 whales per run (credit budget: ~500 Helius credits)
-//   - Two API calls per whale: SWAP (100 txns) + LP types (100 txns)
+//   - Max 2 whales per run (3 ingest calls × 100 txns → ~600 Helius credits)
 //   - Deduplicates on signature — safe to run multiple times
 //   - Protected by CRON_SECRET
 // ============================================================
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { parseTokenMovement } from '@/lib/helius/parse-token-movement';
+import { ingestAddressHistory, historyToRawRow } from '@/lib/ingest/ingest-rpc';
+import { normalizeRawTxBatch } from '@/lib/normalizer';
 import { resolveTokenMetadataBatch } from '@/lib/helius/token-metadata';
-import { getSolPriceUsd } from '@/lib/whale-discovery/balance-checker';
-import type { HeliusEnhancedTx } from '@/lib/helius/parse-movement';
+import { resolveSolPriceUsd } from '@/lib/price-engine';
 import type { WhaleRow, TokenMovementRow } from '@/lib/supabase/types';
+import type { AddressHistory } from '@/lib/providers/interfaces';
 
 // ── Config ────────────────────────────────────────────────────
 
-const MAX_WHALES_PER_RUN  = 2;   // 3 calls × 100 Helius credits each → 600 credits/run
-const TXN_LIMIT_PER_CALL  = 100;
-const LOOKBACK_DAYS       = 90;
-const WHALE_WINDOW_DAYS   = 7;   // only backfill whales added in last N days
-const CALL_DELAY_MS       = 500; // between Helius API calls
+const MAX_WHALES_PER_RUN = 2;    // credit budget per run
+const TXN_LIMIT_PER_CALL = 100;
+const LOOKBACK_DAYS      = 90;
+const WHALE_WINDOW_DAYS  = 7;    // only backfill whales added in last N days
+const CALL_DELAY_MS      = 500;  // between ingest-rpc calls
 
 // ── Logging ───────────────────────────────────────────────────
 
@@ -55,43 +61,20 @@ function verifyCronSecret(req: NextRequest): boolean {
   return header.replace(/^Bearer\s+/, '') === secret;
 }
 
-// ── Helius Enhanced Transactions fetch ────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 
-function heliusApiKey(): string {
-  const key = process.env.HELIUS_API_KEY;
-  if (!key) throw new Error('[backfill] Missing HELIUS_API_KEY');
-  return key;
+function delay(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Fetch enhanced transactions for an address from Helius.
- * type: 'SWAP' | 'ADD_LIQUIDITY' | 'WITHDRAW_LIQUIDITY' | undefined (all)
- */
-async function fetchEnhancedTxns(
-  address: string,
-  type?: string,
-  before?: string,
-): Promise<HeliusEnhancedTx[]> {
-  const key    = heliusApiKey();
-  const params = new URLSearchParams({
-    'api-key': key,
-    limit:     String(TXN_LIMIT_PER_CALL),
+/** Merge AddressHistory arrays and deduplicate by signature. */
+function deduplicateHistory(items: AddressHistory[]): AddressHistory[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    if (seen.has(item.signature)) return false;
+    seen.add(item.signature);
+    return true;
   });
-  if (type)   params.set('type', type);
-  if (before) params.set('before', before);
-
-  const url = `https://api.helius.xyz/v0/addresses/${address}/transactions?${params}`;
-  const res  = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    signal:  AbortSignal.timeout(20_000),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Helius Enhanced TX HTTP ${res.status}: ${body.slice(0, 200)}`);
-  }
-
-  return (await res.json()) as HeliusEnhancedTx[];
 }
 
 // ── Receipt ───────────────────────────────────────────────────
@@ -148,11 +131,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const db = createAdminClient();
 
   // ── 1. Get SOL price ────────────────────────────────────────
-  const solPriceUsd = await getSolPriceUsd().catch(() => 120);
+  const solPriceUsd = await resolveSolPriceUsd(120);
   log('info', `SOL price: $${solPriceUsd}`);
 
   // ── 2. Find whales needing backfill ─────────────────────────
-  // Whales added in last WHALE_WINDOW_DAYS with no token_movements
   const windowCutoff = new Date(Date.now() - WHALE_WINDOW_DAYS * 86_400_000).toISOString();
 
   const { data: whalesRaw, error: whaleErr } = await db
@@ -197,7 +179,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(buildReceipt(runAt, startMs, 0, whalesSkipped, 0, 0, []));
   }
 
-  // Lookback cutoff
   const lookbackCutoff = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000);
 
   // ── 4. Backfill each whale ──────────────────────────────────
@@ -206,76 +187,83 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     whalesScanned++;
 
     try {
-      const whaleSet = new Set([whale.address]);
-      const allTxns: HeliusEnhancedTx[] = [];
+      // ── 4a. Ingest via ingest-rpc ─────────────────────────
+      // Each call fetches from Helius AND archives to raw_transactions.
+      // Returns items[] for downstream normalization.
 
-      // Fetch SWAPs
-      await new Promise(r => setTimeout(r, CALL_DELAY_MS));
-      const swaps = await fetchEnhancedTxns(whale.address, 'SWAP');
-      allTxns.push(...swaps);
+      const swapReceipt = await ingestAddressHistory(db, whale.address, {
+        type:  'SWAP',
+        limit: TXN_LIMIT_PER_CALL,
+      });
+      await delay(CALL_DELAY_MS);
 
-      // Fetch LP events (ADD + WITHDRAW come from same endpoint without type filter
-      // since Helius type filter only supports one type at a time)
-      await new Promise(r => setTimeout(r, CALL_DELAY_MS));
-      const lpAdd = await fetchEnhancedTxns(whale.address, 'ADD_LIQUIDITY');
-      allTxns.push(...lpAdd);
+      const lpAddReceipt = await ingestAddressHistory(db, whale.address, {
+        type:  'ADD_LIQUIDITY',
+        limit: TXN_LIMIT_PER_CALL,
+      });
+      await delay(CALL_DELAY_MS);
 
-      await new Promise(r => setTimeout(r, CALL_DELAY_MS));
-      const lpWithdraw = await fetchEnhancedTxns(whale.address, 'WITHDRAW_LIQUIDITY');
-      allTxns.push(...lpWithdraw);
-
-      // Deduplicate by signature (API may return overlaps)
-      const seenSigs  = new Set<string>();
-      const dedupTxns = allTxns.filter(tx => {
-        if (seenSigs.has(tx.signature)) return false;
-        seenSigs.add(tx.signature);
-        return true;
+      const lpWithdrawReceipt = await ingestAddressHistory(db, whale.address, {
+        type:  'WITHDRAW_LIQUIDITY',
+        limit: TXN_LIMIT_PER_CALL,
       });
 
-      // Filter to lookback window
-      const inWindow = dedupTxns.filter(
-        tx => new Date(tx.timestamp * 1000) >= lookbackCutoff,
-      );
+      // Propagate any ingest errors as warnings (non-fatal — partial data is ok)
+      for (const r of [swapReceipt, lpAddReceipt, lpWithdrawReceipt]) {
+        for (const e of r.errors) log('warn', `  ingest-rpc: ${e}`);
+      }
 
+      log('info', `  Ingest: swap=${swapReceipt.fetched} lpAdd=${lpAddReceipt.fetched} lpWith=${lpWithdrawReceipt.fetched} (provider=${swapReceipt.provider})`);
+
+      // ── 4b. Merge, deduplicate, and apply lookback window ─
+      const allItems = deduplicateHistory([
+        ...swapReceipt.items,
+        ...lpAddReceipt.items,
+        ...lpWithdrawReceipt.items,
+      ]);
+
+      const inWindow = allItems.filter(item => item.block_time >= lookbackCutoff);
       txnsFetched += inWindow.length;
-      log('info', `  Fetched ${inWindow.length} txns (${dedupTxns.length} total, ${dedupTxns.length - inWindow.length} outside window)`);
+
+      log('info', `  ${inWindow.length} txns in window (${allItems.length - inWindow.length} outside ${LOOKBACK_DAYS}d lookback)`);
 
       if (inWindow.length === 0) continue;
 
-      // ── 5. Parse and build token_movement rows ─────────────
-      const rows: Omit<TokenMovementRow, 'id' | 'created_at'>[] = [];
+      // ── 4c. Normalize via normalizer ──────────────────────
+      // Decodes raw payloads → typed movement records.
+      // Uses the whale's own address as the whale set so the decoder
+      // can identify which side of each trade belongs to this whale.
 
-      for (const tx of inWindow) {
-        try {
-          const parsed = parseTokenMovement(tx, whaleSet, solPriceUsd);
-          if (!parsed) continue;
+      const whaleSet  = new Set([whale.address]);
+      const rawRows   = inWindow.map(historyToRawRow);
+      const normalized = normalizeRawTxBatch(rawRows, {
+        whaleAddressSet: whaleSet,
+        solPriceUsd,
+      });
 
-          rows.push({
-            movement_id:     null,
-            whale_id:        whale.id,
-            signature:       parsed.signature,
-            block_time:      parsed.block_time,
-            token_mint:      parsed.token_mint,
-            token_symbol:    null,
-            token_name:      null,
-            action:          parsed.action,
-            amount_token:    parsed.amount_token,
-            amount_sol:      parsed.amount_sol,
-            amount_usd:      parsed.amount_usd,
-            price_per_token: parsed.price_per_token,
-            protocol:        parsed.protocol,
-            pool_address:    null,
-            is_new_token:    false,
-          });
-        } catch { /* skip malformed tx */ }
-      }
+      // ── 4d. Build token_movement rows ─────────────────────
+      // Layer in whale_id (the normalizer is stateless — it doesn't
+      // know DB UUIDs). movement_id is null for backfill; the
+      // real-time webhook handler links movements at write time.
+
+      const rows: Omit<TokenMovementRow, 'id' | 'created_at'>[] = normalized
+        .filter(out => out.tokenMovement !== null)
+        .map(out => ({
+          ...out.tokenMovement!,
+          whale_id:     whale.id,
+          movement_id:  null,
+          token_symbol: null,
+          token_name:   null,
+          pool_address: null,
+          is_new_token: false,
+        }));
 
       if (rows.length === 0) {
-        log('info', `  No parseable token movements found`);
+        log('info', `  No parseable token movements found after normalization`);
         continue;
       }
 
-      // ── 6. Upsert (dedup on signature) ─────────────────────
+      // ── 4e. Upsert token_movements ────────────────────────
       const { error: upsertErr } = await (db as any)
         .from('token_movements')
         .upsert(rows, { onConflict: 'signature', ignoreDuplicates: true });
@@ -287,26 +275,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       txnsInserted += rows.length;
       log('info', `  Inserted ${rows.length} token_movements`);
 
-      // Archive raw txns to sovereign pipeline (fire-and-forget)
-      const rawRows = inWindow
-        .filter(tx => tx?.signature)
-        .map(tx => ({
-          signature:  tx.signature,
-          slot:       (tx as any).slot ?? null,
-          block_time: tx.timestamp ? new Date(tx.timestamp * 1000).toISOString() : null,
-          is_vote:    false,
-          status:     (tx as any).transactionError ? 'failed' : 'success',
-          fee:        tx.fee ?? null,
-          raw_json:   tx,
-          source:     'helius_backfill',
-        }));
-      (createAdminClient() as any)
-        .from('raw_transactions')
-        .upsert(rawRows, { onConflict: 'signature', ignoreDuplicates: true })
-        .then(() => log('info', `  Archived ${rawRows.length} raw txns`))
-        .catch(() => { /* non-critical */ });
-
-      // Enrich token symbols/names (fire-and-forget — same as webhook handler)
+      // ── 4f. Enrich token symbols/names (fire-and-forget) ─
       const mints = [...new Set(rows.map(r => r.token_mint))];
       resolveTokenMetadataBatch(mints)
         .then(async (metaMap) => {

@@ -8,7 +8,7 @@ import {
   classifyWhaleCohort,
   summariseCohorts,
   type WhaleMovementSummary,
-} from '@/lib/flow-engine/cohort-analysis';
+} from '@/lib/signal-engine';
 import type { WhaleRow, MovementRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';

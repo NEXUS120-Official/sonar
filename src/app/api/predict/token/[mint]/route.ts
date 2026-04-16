@@ -13,7 +13,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient }              from '@/lib/supabase/server';
-import { detectTokenAccumulation }        from '@/lib/flow-engine/confluence';
+import { detectTokenAccumulation }        from '@/lib/signal-engine';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';

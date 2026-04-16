@@ -22,7 +22,7 @@
 
 import { NextResponse }            from 'next/server';
 import { createAdminClient }       from '@/lib/supabase/server';
-import { computeDirectionalConfluence } from '@/lib/flow-engine/confluence';
+import { computeDirectionalConfluence } from '@/lib/signal-engine';
 import type { BiasIndexHistoryRow, FlowSnapshotRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';

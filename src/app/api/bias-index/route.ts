@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { calculateBiasIndex } from '@/lib/flow-engine/bias-index';
+import { calculateBiasIndex } from '@/lib/signal-engine';
 import type { FlowSnapshotRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';

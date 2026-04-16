@@ -18,10 +18,10 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { WhaleRow } from '@/lib/supabase/types';
 import {
-  getSolPriceUsd,
   getBatchSolBalances,
   getUsdcBalance,
 } from '@/lib/whale-discovery/balance-checker';
+import { resolveSolPriceUsdWithArchive } from '@/lib/price-engine';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -104,13 +104,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const dbAny = db as any;
 
   // ── 1. Fetch SOL price ──────────────────────────────────────
-  try {
-    sol_price_usd = await getSolPriceUsd();
-    log('info', `SOL price: $${sol_price_usd}`);
-  } catch (err) {
-    log('warn', 'SOL price fetch failed — using fallback $85', err);
-    sol_price_usd = 85;
-  }
+  sol_price_usd = await resolveSolPriceUsdWithArchive(db);
+  log('info', `SOL price: $${sol_price_usd}`);
 
   // ── 2. Load active whales ───────────────────────────────────
   const { data: whalesRaw, error: whaleErr } = await db

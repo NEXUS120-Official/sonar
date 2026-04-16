@@ -15,7 +15,7 @@ import { sendMessage }                    from '@/lib/telegram/bot';
 import {
   detectTokenAccumulation,
   formatTokenAccumulationAlert,
-} from '@/lib/flow-engine/confluence';
+} from '@/lib/signal-engine';
 import type { TokenMovementRow, WhaleRow } from '@/lib/supabase/types';
 
 export const runtime = 'nodejs';

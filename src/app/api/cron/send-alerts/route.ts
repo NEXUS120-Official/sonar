@@ -17,7 +17,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { sendMessage } from '@/lib/telegram/bot';
 import { formatFlowAlert } from '@/lib/telegram/formatter';
-import { getCachedSolPrice } from '@/lib/helius/sol-price-cache';
+import { resolveSolPriceUsdWithArchive } from '@/lib/price-engine';
 import type { AlertRow, FlowType, SignalDirection } from '@/lib/supabase/types';
 
 // ── Config ────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const db = createAdminClient();
 
   // Fetch SOL price once for signal outcome recording
-  const solPriceUsd = await getCachedSolPrice().catch(() => 85);
+  const solPriceUsd = await resolveSolPriceUsdWithArchive(db);
 
   // ── 1. Fetch unsent alerts (free not sent) ─────────────────
   const { data: alertsRaw, error: fetchErr } = await db
