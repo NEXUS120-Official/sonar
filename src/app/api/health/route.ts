@@ -32,7 +32,7 @@ export async function GET(): Promise<NextResponse> {
 
   // ── Fetch subsystem state ─────────────────────────────────
   const db2 = db as any;
-  const [movRes, snapRes, whaleRes, alertRes] = await Promise.all([
+  const [movRes, snapRes, whaleRes, alertRes, rawTxRes, predRes] = await Promise.all([
     // Last movement received via webhook
     db2.from('movements')
       .select('block_time, created_at')
@@ -60,6 +60,20 @@ export async function GET(): Promise<NextResponse> {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle() as Promise<{ data: { created_at: string } | null }>,
+
+    // Sovereign pipeline: last raw_transaction logged
+    db2.from('raw_transactions')
+      .select('created_at, source')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle() as Promise<{ data: { created_at: string; source: string } | null }>,
+
+    // Prediction engine: last prediction_run
+    db2.from('prediction_runs')
+      .select('created_at, evaluated_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle() as Promise<{ data: { created_at: string; evaluated_at: string | null } | null }>,
   ]);
 
   // ── Movement / webhook freshness ──────────────────────────
@@ -131,6 +145,17 @@ export async function GET(): Promise<NextResponse> {
         alerts: {
           last_alert_at: lastAlertAt,
           age_hours:     lastAlertAt ? Math.round(alertAgeMs / 3_600_000 * 10) / 10 : null,
+        },
+        sovereign_pipeline: {
+          status:           rawTxRes.data ? 'active' : 'not_started',
+          last_raw_tx_at:   rawTxRes.data?.created_at ?? null,
+          source:           rawTxRes.data?.source ?? null,
+          note:             'raw_transactions table — grows with every webhook event',
+        },
+        prediction_engine: {
+          status:           predRes.data ? 'active' : 'not_started',
+          last_run_at:      predRes.data?.created_at ?? null,
+          last_evaluated_at: predRes.data?.evaluated_at ?? null,
         },
       },
     },
