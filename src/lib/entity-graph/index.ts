@@ -2,29 +2,34 @@
 // SONAR — Entity Graph Layer
 // ============================================================
 // Internal identity and context resolution for Solana addresses.
-// This is SONAR's intelligence moat: address → entity → context,
-// built entirely on our own data, with no external API dependency.
+// SONAR's intelligence moat: address → entity → context, built
+// entirely on our own data with no external API dependency.
 //
 // Data model (from migration 009):
 //   entity_addresses      — maps address → entity_id (many-to-one)
 //   entities              — canonical entity records
-//   wallet_clusters       — behavioral groups (future: accumulator, staker, ...)
+//   wallet_clusters       — behavioral groups (future)
 //   wallet_cluster_members — address → cluster membership
 //
 // Resolution rules:
-//   - resolveAddress() / resolveAddressBatch() return null / absent key
+//   - resolveAddress / resolveAddressBatch return null / absent key
 //     for unknown addresses — never fabricate identity
-//   - callers must handle null / missing entries explicitly
-//   - cluster fields are in the output shape; null when tables are empty
+//   - callers must handle null / absent entries explicitly
+//   - cluster fields null until wallet_cluster_members is populated
 //
-// Integration note:
-//   resolveAddressBatch() is wired into HeliusWebhookProcessor.persistMovements()
-//   to supplement from_label/to_label for addresses not covered by the
-//   in-memory constants cache (whale addresses, custom entities).
-//   It supplements null labels only — never overrides existing ones.
+// Behavior tags (deriveAddressTags):
+//   - purely observational — derived from movement history
+//   - do NOT create entity records for unknown addresses
+//   - unknown addresses can have behavior context without identity
+//   - tags require ≥ minObservations of a type (default 3)
+//
+// Live integration points:
+//   resolveAddressBatch() → helius-webhook persistMovements:
+//     supplements from_label/to_label where constants decoder returned null
+//   resolveAddressBatch() → helius-webhook fireHotAlerts:
+//     entity context in alert body (fallback) + alert data JSONB
 //
 // Future integration points (not yet wired):
-//   - fireHotAlerts: entity context in alert title/body
 //   - /api/flow/* routes: entity type badges on movement summaries
 //   - process-flows anomaly detection: entity-aware signal weighting
 // ============================================================
@@ -68,6 +73,35 @@ export interface EntityWithAddresses {
   }>;
 }
 
+/**
+ * Behavior context derived from observed movement history.
+ * Distinct from ResolvedEntity — does not assert identity, only
+ * describes what we observed about an address's on-chain behavior.
+ * Unknown addresses (absent from entity graph) can still have behavior context.
+ */
+export interface AddressBehaviorContext {
+  address:            string;
+  observation_window_h: number;   // how far back we looked (hours)
+  tags:               string[];   // e.g. ['accumulator', 'staker']
+  movement_counts:    Record<string, number>; // flow_type → count
+  total_movements:    number;
+  total_volume_usd:   number;
+}
+
+/** Entity graph coverage statistics for internal audit. */
+export interface EntityCoverageStats {
+  total_entities:   number;
+  by_entity_type:   Record<string, number>;
+  total_addresses:  number;  // total entity_addresses rows
+  active_addresses: number;
+  // Top from_addresses in recent movements not covered by entity_addresses
+  uncovered_hot: Array<{
+    address:          string;
+    movement_count:   number;
+    total_volume_usd: number;
+  }>;
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 
 const VALID_WALLET_PROFILE_TYPES = [
@@ -104,8 +138,7 @@ function deriveTags(
  *   entity_addresses (address + chain='solana' + is_active=true) → JOIN entities
  *   → secondary: wallet_cluster_members → wallet_clusters
  *
- * Returns null for any address not in the entity graph.
- * Never fabricates identity — null means unknown.
+ * Returns null for unknown addresses. Never fabricates identity.
  */
 export async function resolveAddress(
   address: string,
@@ -142,7 +175,6 @@ export async function resolveAddress(
     confidence: number; verified: boolean; source: string | null;
   };
 
-  // Cluster lookup (empty tables → null cleanly)
   const { data: clusterData } = await dba
     .from('wallet_cluster_members')
     .select('cluster_id, wallet_clusters ( cluster_type )')
@@ -180,12 +212,8 @@ type RawAddressRow = {
   confidence: number | null;
   source:     string | null;
   entities: {
-    id: string;
-    entity_type: string;
-    canonical_name: string | null;
-    confidence: number | null;
-    verified: boolean | null;
-    source: string | null;
+    id: string; entity_type: string; canonical_name: string | null;
+    confidence: number | null; verified: boolean | null; source: string | null;
   } | null;
 };
 
@@ -197,50 +225,30 @@ type RawClusterRow = {
 
 /**
  * Resolve multiple addresses in two batch queries (entity + cluster).
- * Returns a Map containing only found addresses — absent keys are unknown.
- * Never fabricates identity for missing entries.
- *
- * Cluster fields are populated when wallet_cluster_members is populated.
- * Until then they are null — no caller change required when clusters arrive.
+ * Returns a Map — absent keys are unknown, not fabricated.
+ * Cluster fields populated when wallet_cluster_members has rows; null until then.
  */
 export async function resolveAddressBatch(
   addresses: string[],
   db:        Db,
 ): Promise<Map<string, ResolvedEntity>> {
-  const validAddresses = addresses.filter(a => typeof a === 'string' && a.length > 0);
-  if (validAddresses.length === 0) return new Map();
+  const valid = addresses.filter(a => typeof a === 'string' && a.length > 0);
+  if (valid.length === 0) return new Map();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dba = db as any;
 
-  // Query 1: entity_addresses → entities
-  const { data: addrRows, error } = await dba
-    .from('entity_addresses')
-    .select(`
-      address,
-      label,
-      confidence,
-      source,
-      entities (
-        id,
-        entity_type,
-        canonical_name,
-        confidence,
-        verified,
-        source
-      )
-    `)
-    .in('address', validAddresses)
-    .eq('chain', 'solana')
-    .eq('is_active', true);
+  const [{ data: addrRows, error }, { data: clusterRows }] = await Promise.all([
+    dba.from('entity_addresses').select(`
+      address, label, confidence, source,
+      entities ( id, entity_type, canonical_name, confidence, verified, source )
+    `).in('address', valid).eq('chain', 'solana').eq('is_active', true),
+    dba.from('wallet_cluster_members')
+      .select('address, cluster_id, wallet_clusters ( cluster_type )')
+      .in('address', valid),
+  ]);
 
   if (error || !addrRows) return new Map();
-
-  // Query 2: cluster membership (single IN query — empty tables return [])
-  const { data: clusterRows } = await dba
-    .from('wallet_cluster_members')
-    .select('address, cluster_id, wallet_clusters ( cluster_type )')
-    .in('address', validAddresses);
 
   const clusterMap = new Map<string, { cluster_id: string; cluster_type: string | null }>();
   for (const row of (clusterRows ?? []) as RawClusterRow[]) {
@@ -256,13 +264,12 @@ export async function resolveAddressBatch(
     if (!row.entities) continue;
     const ent     = row.entities;
     const cluster = clusterMap.get(row.address) ?? null;
+    const cluster_type = cluster?.cluster_type ?? null;
 
     const confidence = Math.min(
       typeof row.confidence === 'number' ? row.confidence : 50,
       typeof ent.confidence  === 'number' ? ent.confidence  : 50,
     );
-
-    const cluster_type = cluster?.cluster_type ?? null;
 
     result.set(row.address, {
       entity_id:      ent.id,
@@ -285,8 +292,7 @@ export async function resolveAddressBatch(
 
 /**
  * Load a full entity record with all its mapped addresses.
- * Useful for building exchange/protocol summaries and entity admin views.
- * Returns null if the entity_id does not exist.
+ * Returns null if entity_id does not exist.
  */
 export async function getEntityById(
   entityId: string,
@@ -302,8 +308,6 @@ export async function getEntityById(
 
   if (error || !entity) return null;
 
-  const tags = deriveTags(entity.entity_type, null, entity.verified ?? false, null);
-
   return {
     entity_id:      entity.id,
     entity_type:    entity.entity_type,
@@ -312,7 +316,7 @@ export async function getEntityById(
     confidence:     entity.confidence     ?? 50,
     verified:       entity.verified       ?? false,
     source:         entity.source         ?? null,
-    tags,
+    tags:           deriveTags(entity.entity_type, null, entity.verified ?? false, null),
     addresses: ((addrRows ?? []) as Array<{
       address: string; label: string | null; confidence: number | null; is_active: boolean;
     }>).map(r => ({
@@ -326,15 +330,14 @@ export async function getEntityById(
 
 /**
  * Get all addresses mapped to an entity.
- * opts.activeOnly defaults to true — pass false to include inactive addresses.
+ * opts.activeOnly defaults to true.
  */
 export async function getAddressesForEntity(
-  entityId:  string,
-  db:        Db,
-  opts:      { activeOnly?: boolean } = {},
+  entityId: string,
+  db:       Db,
+  opts:     { activeOnly?: boolean } = {},
 ): Promise<Array<{ address: string; label: string | null; confidence: number; is_active: boolean }>> {
   const activeOnly = opts.activeOnly ?? true;
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let q = (db as any)
     .from('entity_addresses')
@@ -342,11 +345,9 @@ export async function getAddressesForEntity(
     .eq('entity_id', entityId)
     .eq('chain', 'solana')
     .order('is_active', { ascending: false });
-
   if (activeOnly) q = q.eq('is_active', true);
 
   const { data } = await q;
-
   return ((data ?? []) as Array<{
     address: string; label: string | null; confidence: number | null; is_active: boolean;
   }>).map(r => ({
@@ -362,10 +363,7 @@ export async function getAddressesForEntity(
 /**
  * Converts a ResolvedEntity to the WalletProfile interface shape.
  * Only call after resolveAddress() returns non-null.
- *
- * For unknown addresses (null from resolveAddress), return null at
- * the call site. Do not synthesise a WalletProfile for unknown addresses —
- * build a display-layer adapter at the call site if needed.
+ * For unknown addresses, return null — do not synthesise a profile.
  */
 export function toWalletProfile(
   address: string,
@@ -377,5 +375,158 @@ export function toWalletProfile(
     label:            entity.label ?? entity.canonical_name,
     tags:             entity.tags,
     discovery_source: entity.source,
+  };
+}
+
+// ── Behavior-derived tags ─────────────────────────────────────
+
+const BEHAVIOR_TAG_MIN_OBSERVATIONS = 3; // minimum movements of a type to emit a tag
+
+/**
+ * Derive behavioral tags for an address from observed movement history.
+ *
+ * This does NOT create entity records. Tags describe what we observed —
+ * they are not identity assertions. Unknown addresses (absent from entity
+ * graph) can have behavior context without being assigned an identity.
+ *
+ * Tags emitted (each requires ≥ minObservations):
+ *   'accumulator'    — exchange_withdrawal count > exchange_deposit * 1.5
+ *   'distributor'    — exchange_deposit count > exchange_withdrawal * 1.5
+ *   'staker'         — stake movements ≥ minObservations
+ *   'defi_active'    — defi_deposit movements ≥ minObservations
+ *   'high_frequency' — total movements ≥ 20 in window
+ */
+export async function deriveAddressTags(
+  address:  string,
+  db:       Db,
+  opts:     { windowHours?: number; minObservations?: number } = {},
+): Promise<AddressBehaviorContext> {
+  const windowHours    = opts.windowHours    ?? 168;
+  const minObservations = opts.minObservations ?? BEHAVIOR_TAG_MIN_OBSERVATIONS;
+  const cutoff         = new Date(Date.now() - windowHours * 3_600_000).toISOString();
+
+  const { data: movRows } = await (db as any)
+    .from('movements')
+    .select('flow_type, amount_usd')
+    .or(`from_address.eq.${address},to_address.eq.${address}`)
+    .gte('block_time', cutoff)
+    .order('block_time', { ascending: false })
+    .limit(500);
+
+  const rows = (movRows ?? []) as Array<{ flow_type: string; amount_usd: number | null }>;
+
+  const counts: Record<string, number> = {};
+  let totalVolume = 0;
+  for (const r of rows) {
+    counts[r.flow_type] = (counts[r.flow_type] ?? 0) + 1;
+    totalVolume += r.amount_usd ?? 0;
+  }
+
+  const tags: string[] = [];
+
+  const deposits    = counts['exchange_deposit']    ?? 0;
+  const withdrawals = counts['exchange_withdrawal'] ?? 0;
+  const stakes      = counts['stake']               ?? 0;
+  const defiDeposits = counts['defi_deposit']       ?? 0;
+
+  if (withdrawals >= minObservations && withdrawals > deposits * 1.5) tags.push('accumulator');
+  if (deposits    >= minObservations && deposits > withdrawals * 1.5)  tags.push('distributor');
+  if (stakes      >= minObservations)                                   tags.push('staker');
+  if (defiDeposits >= minObservations)                                  tags.push('defi_active');
+  if (rows.length >= 20)                                                tags.push('high_frequency');
+
+  return {
+    address,
+    observation_window_h: windowHours,
+    tags,
+    movement_counts:  counts,
+    total_movements:  rows.length,
+    total_volume_usd: Math.round(totalVolume),
+  };
+}
+
+// ── Coverage audit ────────────────────────────────────────────
+
+/**
+ * Entity graph coverage statistics for internal audit.
+ *
+ * uncovered_hot: top from_addresses in recent movements not in entity_addresses.
+ * Useful for identifying high-activity addresses that should be seeded.
+ * Uses a JS-side aggregation of sampled movements (no GROUP BY migration needed).
+ */
+export async function getEntityCoverage(
+  db:   Db,
+  opts: { topUncoveredN?: number; movementSampleSize?: number } = {},
+): Promise<EntityCoverageStats> {
+  const topN        = opts.topUncoveredN      ?? 20;
+  const sampleSize  = opts.movementSampleSize ?? 5_000;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    { data: entityRows },
+    { data: addrCountRows },
+    { data: activeAddrRows },
+    { data: recentMovs },
+  ] = await Promise.all([
+    dba.from('entities').select('entity_type'),
+    dba.from('entity_addresses').select('id', { count: 'exact', head: true }),
+    dba.from('entity_addresses').select('id', { count: 'exact', head: true }).eq('is_active', true),
+    dba.from('movements')
+      .select('from_address, amount_usd')
+      .not('from_address', 'is', null)
+      .order('block_time', { ascending: false })
+      .limit(sampleSize),
+  ]);
+
+  // Count entities by type
+  const by_entity_type: Record<string, number> = {};
+  for (const row of (entityRows ?? []) as Array<{ entity_type: string }>) {
+    by_entity_type[row.entity_type] = (by_entity_type[row.entity_type] ?? 0) + 1;
+  }
+
+  // Group movements by from_address in JS
+  const addrStats = new Map<string, { count: number; volume: number }>();
+  for (const m of (recentMovs ?? []) as Array<{ from_address: string | null; amount_usd: number | null }>) {
+    const addr = m.from_address;
+    if (!addr) continue;
+    const s = addrStats.get(addr) ?? { count: 0, volume: 0 };
+    s.count++;
+    s.volume += m.amount_usd ?? 0;
+    addrStats.set(addr, s);
+  }
+
+  // Top from_addresses by movement count
+  const topAddrs = [...addrStats.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, topN * 3)  // over-fetch to account for covered ones
+    .map(([addr]) => addr);
+
+  // Check which are covered in entity_addresses
+  const { data: coveredRows } = topAddrs.length > 0
+    ? await dba.from('entity_addresses').select('address').in('address', topAddrs)
+    : { data: [] };
+
+  const coveredSet = new Set(
+    ((coveredRows ?? []) as Array<{ address: string }>).map(r => r.address),
+  );
+
+  const uncovered_hot = [...addrStats.entries()]
+    .filter(([addr]) => !coveredSet.has(addr))
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, topN)
+    .map(([address, s]) => ({
+      address,
+      movement_count:   s.count,
+      total_volume_usd: Math.round(s.volume),
+    }));
+
+  return {
+    total_entities:   entityRows?.length ?? 0,
+    by_entity_type,
+    total_addresses:  (addrCountRows as any)?.count ?? 0,
+    active_addresses: (activeAddrRows as any)?.count ?? 0,
+    uncovered_hot,
   };
 }

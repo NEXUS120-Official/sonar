@@ -324,11 +324,14 @@ export class HeliusWebhookProcessor {
     if (candidates.length === 0) return;
 
     const addrs = [...new Set(candidates.flatMap(m => [m.from_address, m.to_address]))];
-    const { data: whaleRows } = await db
-      .from('whales')
-      .select('id, address, label, reputation_score, smart_money_flag')
-      .in('address', addrs)
-      .eq('is_active', true);
+    const [{ data: whaleRows }, entityByAddr] = await Promise.all([
+      db
+        .from('whales')
+        .select('id, address, label, reputation_score, smart_money_flag')
+        .in('address', addrs)
+        .eq('is_active', true),
+      resolveAddressBatch(addrs, db),
+    ]);
 
     type WhaleInfo = { id: string; label: string | null; reputation_score: number | null; smart_money_flag: boolean | null };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -359,6 +362,7 @@ export class HeliusWebhookProcessor {
 
     for (const m of candidates) {
       const whale       = whaleByAddr.get(m.from_address) ?? whaleByAddr.get(m.to_address);
+      const entity      = entityByAddr.get(m.from_address) ?? entityByAddr.get(m.to_address) ?? null;
       const whaleId     = whale?.id ?? null;
       const cooldownKey = whaleId ?? m.from_address;
 
@@ -375,10 +379,14 @@ export class HeliusWebhookProcessor {
       const smartBadge = whale?.smart_money_flag ? ' ⭐ Smart Money' : '';
       const repBadge   = whale?.reputation_score ? ` [rep ${whale.reputation_score}]` : '';
       const title      = `Whale ${action} ${fmtUsd(amtUsd)}${smartBadge}`;
+      const entityName  = entity?.canonical_name ?? entity?.label ?? null;
+      const entityBadge = entity?.verified ? ' [verified]' : '';
       const body       = [
         whale?.label
           ? `Wallet: ${whale.label}${repBadge}`
-          : `Address: ${m.from_address.slice(0, 8)}…`,
+          : entityName
+            ? `Entity: ${entityName}${entityBadge}`
+            : `Address: ${m.from_address.slice(0, 8)}…`,
         `Action: ${action}`,
         m.exchange ? `Exchange: ${m.exchange}` : m.protocol ? `Protocol: ${m.protocol}` : null,
         `Amount: ${fmtUsd(amtUsd)} SOL @ $${solPrice.toFixed(2)}`,
@@ -392,7 +400,7 @@ export class HeliusWebhookProcessor {
           severity,
           title,
           body,
-          data:                  { amount_usd: amtUsd, flow_type: m.flow_type, exchange: m.exchange, protocol: m.protocol, whale_id: whaleId, smart_money: whale?.smart_money_flag ?? false },
+          data:                  { amount_usd: amtUsd, flow_type: m.flow_type, exchange: m.exchange, protocol: m.protocol, whale_id: whaleId, smart_money: whale?.smart_money_flag ?? false, entity_id: entity?.entity_id ?? null, entity_type: entity?.entity_type ?? null, entity_name: entityName, entity_verified: entity?.verified ?? false },
           movement_ids:          null,
           ai_analysis:           null,
           sent_telegram_free:    false,
