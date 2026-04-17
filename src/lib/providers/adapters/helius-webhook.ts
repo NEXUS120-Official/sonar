@@ -25,6 +25,7 @@ import type { createAdminClient } from '@/lib/supabase/server';
 import { txToRawRow, type RawTxPayload } from '@/lib/decoder';
 import { normalizeRawTx, type NormalizedOutput } from '@/lib/normalizer';
 import { resolveTokenMetadataBatch } from '@/lib/helius/token-metadata';
+import { resolveAddressBatch } from '@/lib/entity-graph';
 import { sendMessage } from '@/lib/telegram/bot';
 import { formatFlowAlert } from '@/lib/telegram/formatter';
 import type { MovementRow, TokenMovementRow, AlertRow } from '@/lib/supabase/types';
@@ -189,21 +190,30 @@ export class HeliusWebhookProcessor {
     const valid = movements.filter((m): m is NonNullable<typeof m> => m !== null);
     if (valid.length === 0) return { inserted: 0, skipped: 0 };
 
-    // Resolve whale_id for from/to addresses in one batch query
-    const addresses = [...new Set(valid.flatMap(m => [m.from_address, m.to_address]))];
-    const { data: whales } = await db
-      .from('whales')
-      .select('id, address')
-      .in('address', addresses);
+    // Resolve whale_id and entity labels for from/to addresses in batch
+    const addresses = [...new Set(valid.flatMap(m => [m.from_address, m.to_address]).filter(Boolean))];
+
+    const [whaleResult, entityMap] = await Promise.all([
+      db.from('whales').select('id, address').in('address', addresses),
+      resolveAddressBatch(addresses, db),
+    ]);
 
     const whaleMap = new Map<string, string>(
-      ((whales ?? []) as { id: string; address: string }[]).map(w => [w.address, w.id]),
+      ((whaleResult.data ?? []) as { id: string; address: string }[]).map(w => [w.address, w.id]),
     );
 
-    const rows = valid.map(m => ({
-      ...m,
-      whale_id: whaleMap.get(m.from_address) ?? whaleMap.get(m.to_address) ?? null,
-    } satisfies Omit<MovementRow, 'id' | 'processed_at' | 'created_at'>));
+    const rows = valid.map(m => {
+      const fromEntity = entityMap.get(m.from_address);
+      const toEntity   = entityMap.get(m.to_address);
+      return {
+        ...m,
+        whale_id:  whaleMap.get(m.from_address) ?? whaleMap.get(m.to_address) ?? null,
+        // Entity graph enrichment: supplement null labels only — never override
+        // labels already set by the constants-backed known_addresses decoder.
+        from_label: m.from_label ?? fromEntity?.label ?? fromEntity?.canonical_name ?? null,
+        to_label:   m.to_label   ?? toEntity?.label   ?? toEntity?.canonical_name   ?? null,
+      } satisfies Omit<MovementRow, 'id' | 'processed_at' | 'created_at'>;
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: inserted, error } = await (db as any)
