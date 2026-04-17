@@ -125,6 +125,26 @@ export interface WhaleRow {
   smart_money_flag:   boolean | null;
 }
 
+export interface WalletClusterRow {
+  id:            string;
+  cluster_name:  string | null;
+  cluster_type:  string;
+  methodology:   string | null;  // 'behavior_v1' | future versions
+  avg_trade_usd: number | null;
+  member_count:  number;
+  is_active:     boolean;
+  last_computed: string | null;
+  metadata:      Json | null;
+  created_at:    string;
+}
+
+export interface WalletClusterMemberRow {
+  cluster_id: string;
+  address:    string;
+  weight:     number;  // 0.0–1.0 normalized strength score (behavior_v1)
+  added_at:   string;
+}
+
 export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
 
 export interface WhaleSignalOutcomeRow {
