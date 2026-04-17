@@ -67,18 +67,24 @@ export interface DerivedFeatureColumns {
 }
 
 export interface DeriveFeatureOptions {
-  mode:       FeatureSourceMode;
-  movements?: MovementRow[];                    // omit for backfill path
-  baseline?:  { market_bias: string | null } | null; // prior snapshot for reversal detection
+  mode:                  FeatureSourceMode;
+  movements?:            MovementRow[];                    // omit for backfill path
+  baseline?:             { market_bias: string | null } | null; // prior snapshot for reversal detection
+  // Cohort-aware feature inputs — computed externally and passed in to preserve purity.
+  // When provided, cluster_activity_score uses the real net cohort bias signal.
+  // When absent (backfill path), falls back to the large_movements_count proxy.
+  clusterActivityScore?: number;                           // [-1, +1] net cohort bias
+  cohortCounts?:         Record<string, number>;           // cluster_type → unique active wallets
 }
 
 export interface FeatureBuilderContext {
-  snapshot:       SnapshotInsert;
-  baseline:       FlowSnapshotRow | null;
-  movements4h:    MovementRow[];
-  biasScore:      number;
-  biasLabel:      string;
-  biasConfidence: number;
+  snapshot:         SnapshotInsert;
+  baseline:         FlowSnapshotRow | null;
+  movements4h:      MovementRow[];
+  biasScore:        number;
+  biasLabel:        string;
+  biasConfidence:   number;
+  clusterMemberMap?: Map<string, string>; // address → cluster_type; optional, live path only
 }
 
 export interface FeatureBuildReceipt {
@@ -125,6 +131,38 @@ function detectFlowReversal(
   );
 }
 
+// ── Cohort counts (pure) ──────────────────────────────────────
+
+/**
+ * Count unique active wallet addresses per cluster type within a movement set.
+ *
+ * Checks both from_address and to_address — necessary because the "whale side"
+ * varies by flow_type (e.g. exchange_withdrawal: whale receives, is to_address).
+ * Pure function — no DB. Called before deriveFeatureColumns in the live path.
+ */
+export function computeCohortCounts(
+  movements:        MovementRow[],
+  clusterMemberMap: Map<string, string>, // address → cluster_type
+): Record<string, number> {
+  const activeByCluster = new Map<string, Set<string>>();
+
+  for (const m of movements) {
+    for (const addr of [m.from_address, m.to_address]) {
+      const ct = clusterMemberMap.get(addr);
+      if (!ct) continue;
+      let s = activeByCluster.get(ct);
+      if (!s) { s = new Set(); activeByCluster.set(ct, s); }
+      s.add(addr);
+    }
+  }
+
+  const result: Record<string, number> = {};
+  for (const [ct, addrs] of activeByCluster) {
+    result[ct] = addrs.size;
+  }
+  return result;
+}
+
 // ── Canonical derivation function ─────────────────────────────
 
 /**
@@ -140,7 +178,7 @@ export function deriveFeatureColumns(
   biasConfidence: number,
   opts:           DeriveFeatureOptions,
 ): DerivedFeatureColumns {
-  const { mode, movements = [], baseline = null } = opts;
+  const { mode, movements = [], baseline = null, clusterActivityScore: providedCAS, cohortCounts } = opts;
 
   // ── Scalar features ────────────────────────────────────────
 
@@ -155,7 +193,12 @@ export function deriveFeatureColumns(
       : 0,
     0, 10,
   );
-  const clusterActivityScore = clamp(snapshot.large_movements_count / 50, 0, 1);
+  // When cluster data is available (live path): real net cohort bias [-1, +1].
+  // Positive = accumulators dominating (bullish). Negative = distributors dominating.
+  // When absent (backfill path): falls back to large_movements_count proxy [0, 1].
+  const clusterActivityScore = providedCAS !== undefined
+    ? providedCAS
+    : clamp(snapshot.large_movements_count / 50, 0, 1);
   const smartMoneyNetBias    = clamp(biasScore / 100, -1, 1);
   const stablecoinDexIntensity = clamp(
     snapshot.defi_deposit_usd / (snapshot.defi_deposit_usd + snapshot.sol_exchange_inflow_usd + 1),
@@ -193,6 +236,16 @@ export function deriveFeatureColumns(
 
     // ── Movement-level fields — populated on live_full path only ──
     exchange_flow_by_exchange:  exchangeFlowByExchange,
+
+    // ── Cohort-level fields — populated when clusterMemberMap provided ──
+    // null when cluster data unavailable (backfill path or first run before clustering).
+    cohort_data_available:              providedCAS !== undefined,
+    cohort_accumulator_active:          cohortCounts?.['accumulator']            ?? null,
+    cohort_distributor_active:          cohortCounts?.['distributor']            ?? null,
+    cohort_staker_active:               cohortCounts?.['staker']                 ?? null,
+    cohort_exchange_heavy_active:       cohortCounts?.['exchange_heavy']         ?? null,
+    cohort_defi_rotator_active:         cohortCounts?.['defi_rotator']           ?? null,
+    cohort_inactive_large_holder_active: cohortCounts?.['inactive_large_holder'] ?? null,
   };
 
   return {
@@ -218,12 +271,25 @@ export async function buildPredictionFeatures(
   ctx: FeatureBuilderContext,
   db:  Db,
 ): Promise<FeatureBuildReceipt> {
-  const { snapshot, baseline, movements4h, biasScore, biasLabel, biasConfidence } = ctx;
+  const { snapshot, baseline, movements4h, biasScore, biasLabel, biasConfidence, clusterMemberMap } = ctx;
+
+  // Compute cohort-aware inputs when cluster map is available (live path).
+  let clusterActivityScore: number | undefined;
+  let cohortCounts: Record<string, number> | undefined;
+
+  if (clusterMemberMap && clusterMemberMap.size > 0) {
+    cohortCounts = computeCohortCounts(movements4h, clusterMemberMap);
+    const acc = cohortCounts['accumulator'] ?? 0;
+    const dis = cohortCounts['distributor'] ?? 0;
+    clusterActivityScore = clamp((acc - dis) / (acc + dis + 1), -1, 1);
+  }
 
   const cols = deriveFeatureColumns(snapshot, biasScore, biasLabel, biasConfidence, {
-    mode:      'live_full',
-    movements: movements4h,
+    mode:                 'live_full',
+    movements:            movements4h,
     baseline,
+    clusterActivityScore,
+    cohortCounts,
   });
 
   const rows = PREDICTION_HORIZONS.map(horizon => ({

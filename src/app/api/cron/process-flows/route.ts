@@ -259,15 +259,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Derives and upserts prediction_features rows for all horizons.
   // Non-critical: wrapped in try/catch so a failure never kills the cron.
   if (snapshot4h && biasResult) {
+    // Load cluster member map for cohort-aware feature scoring.
+    // One read per cron tick — addresses → cluster_type.
+    // Failures are non-fatal: missing map → placeholder score used.
+    let clusterMemberMap: Map<string, string> | undefined;
+    try {
+      const { data: clusterMembers } = await (db as any)
+        .from('wallet_cluster_members')
+        .select('address, wallet_clusters ( cluster_type, is_active, methodology )');
+
+      clusterMemberMap = new Map(
+        ((clusterMembers ?? []) as Array<{
+          address: string;
+          wallet_clusters: { cluster_type: string; is_active: boolean; methodology: string | null } | null;
+        }>)
+          .filter(r => r.wallet_clusters?.is_active === true && r.wallet_clusters?.methodology === 'behavior_v1')
+          .map(r => [r.address, r.wallet_clusters!.cluster_type]),
+      );
+      if (clusterMemberMap.size > 0) {
+        log('info', `Cluster member map: ${clusterMemberMap.size} addresses`);
+      }
+    } catch (err) {
+      log('warn', `Cluster member map load failed (non-critical): ${String(err)}`);
+    }
+
     try {
       const featureReceipt = await buildPredictionFeatures(
         {
-          snapshot:       snapshot4h,
+          snapshot:         snapshot4h,
           baseline,
           movements4h,
-          biasScore:      biasResult.score,
-          biasLabel:      biasResult.bias,
-          biasConfidence: biasResult.confidence,
+          biasScore:        biasResult.score,
+          biasLabel:        biasResult.bias,
+          biasConfidence:   biasResult.confidence,
+          clusterMemberMap,
         },
         db,
       );

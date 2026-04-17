@@ -20,7 +20,8 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { resolveAddressBatch } from '@/lib/entity-graph';
+import { resolveAddressBatch }  from '@/lib/entity-graph';
+import { getCohortActivity, type CohortActivityEntry } from '@/lib/entity-graph/cohort-activity';
 import type { FlowSnapshotRow, AlertRow, MovementRow, AlertType } from '@/lib/supabase/types';
 
 // ── Auth ──────────────────────────────────────────────────────
@@ -110,12 +111,29 @@ interface WeeklyReport {
     block_time:  string;
     entity_name: string | null;
   }[];
+  cohort_summary: {
+    by_cluster:      CohortActivityEntry[];
+    dominant_cohort: string | null;  // cluster_type with highest absolute net_exchange_flow_usd
+  } | null;
   publish_text: string;
+}
+
+function clusterLabel(type: string): string {
+  const labels: Record<string, string> = {
+    accumulator:           'Accumulators',
+    distributor:           'Distributors',
+    staker:                'Stakers',
+    defi_rotator:          'DeFi Rotators',
+    exchange_heavy:        'Exchange Heavy',
+    inactive_large_holder: 'Large Holders (inactive)',
+  };
+  return labels[type] ?? type;
 }
 
 function buildPublishText(r: Omit<WeeklyReport, 'publish_text'>): string {
   const {
-    week, exchange_recap: ex, staking_recap: st, bias_trend: bt, alerts_summary: al, top_moves,
+    week, exchange_recap: ex, staking_recap: st, bias_trend: bt, alerts_summary: al,
+    top_moves, cohort_summary,
   } = r;
 
   const avgBias   = bt.avg_score;
@@ -127,6 +145,16 @@ function buildPublishText(r: Omit<WeeklyReport, 'publish_text'>): string {
     const actorStr = actor ? ` — ${actor}` : '';
     return `  • ${m.flow_type.replace(/_/g, ' ')} ${fmtUsd(m.amount_usd)}${actorStr}`;
   });
+
+  // Cohort section — max 3 lines; sorted by active wallet count descending
+  const cohortLines = (cohort_summary?.by_cluster ?? [])
+    .slice(0, 3)
+    .map(c => {
+      const net = c.net_exchange_flow_usd !== 0
+        ? ` ${c.net_exchange_flow_usd > 0 ? '+' : ''}${fmtUsd(c.net_exchange_flow_usd)} net`
+        : '';
+      return `  ${clusterLabel(c.cluster_type)}: ${c.active_wallets} active${net}`;
+    });
 
   const lines = [
     `SONAR Weekly Intelligence — ${week}`,
@@ -144,6 +172,8 @@ function buildPublishText(r: Omit<WeeklyReport, 'publish_text'>): string {
     '',
     `Alerts fired: ${al.total}`,
     ...Object.entries(al.by_type).map(([t, n]) => `  ${t}: ${n}`),
+    ...(cohortLines.length > 0 ? ['', 'Cohort Activity:'] : []),
+    ...cohortLines,
     ...(topMoveLines.length > 0 ? ['', 'Top moves:'] : []),
     ...topMoveLines,
   ].filter(l => l !== '');
@@ -197,6 +227,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .neq('alert_type', 'weekly_report'); // exclude prior weekly reports
 
   const alerts = (alertsRaw ?? []) as Pick<AlertRow, 'alert_type' | 'severity' | 'created_at'>[];
+
+  // ── 3b. Load cohort activity for the 7d window ───────────────
+  // Non-blocking: if clustering hasn't run yet, returns [] gracefully.
+  const cohortActivity = await getCohortActivity(db, { windowHours: 168 }).catch(() => []);
 
   // ── 4. Load top 10 movements by USD (+ from_address for entity lookup) ──
   const { data: topMovesRaw } = await db
@@ -309,6 +343,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         entity_name,
       };
     }),
+    cohort_summary: cohortActivity.length > 0
+      ? {
+          by_cluster:      cohortActivity,
+          dominant_cohort: cohortActivity.reduce(
+            (best, c) => Math.abs(c.net_exchange_flow_usd) > Math.abs(best.net_exchange_flow_usd) ? c : best,
+          ).cluster_type,
+        }
+      : null,
   };
 
   const publish_text = buildPublishText(reportData);

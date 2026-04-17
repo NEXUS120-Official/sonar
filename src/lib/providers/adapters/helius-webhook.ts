@@ -390,6 +390,9 @@ export class HeliusWebhookProcessor {
         `Action: ${action}`,
         m.exchange ? `Exchange: ${m.exchange}` : m.protocol ? `Protocol: ${m.protocol}` : null,
         `Amount: ${fmtUsd(amtUsd)} SOL @ $${solPrice.toFixed(2)}`,
+        entity?.cluster_type
+          ? `Cluster: ${entity.cluster_type.replace(/_/g, ' ')}`
+          : null,
       ].filter(Boolean).join('\n');
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
