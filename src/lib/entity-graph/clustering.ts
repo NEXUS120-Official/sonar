@@ -310,7 +310,15 @@ export async function buildBehaviorClusters(
   }
 
   // ── 4. Assign cluster types ───────────────────────────────
-  const assignments = new Map<ClusterType, Array<{ address: string; weight: number; avg_trade_usd: number | null }>>();
+  type MemberEntry = {
+    address:       string;
+    weight:        number;
+    avg_trade_usd: number | null;
+    counts:        WalletFlowCounts;
+    balance:       WalletBalanceState;
+  };
+
+  const assignments = new Map<ClusterType, MemberEntry[]>();
   for (const t of CLUSTER_PRIORITY) assignments.set(t, []);
 
   let assigned   = 0;
@@ -325,9 +333,11 @@ export async function buildBehaviorClusters(
         ? Math.round(counts.total_volume_usd / counts.total)
         : null;
       assignments.get(result.type)!.push({
-        address:       addr,
-        weight:        result.weight,
+        address: addr,
+        weight:  result.weight,
         avg_trade_usd,
+        counts,
+        balance,
       });
       assigned++;
     } else {
@@ -380,11 +390,26 @@ export async function buildBehaviorClusters(
       await dba.from('wallet_cluster_members').delete().eq('cluster_id', clusterId);
 
       // 5c. Insert fresh members in batches
-      const BATCH = 500;
-      const memberRows = members.map(m => ({
+      const BATCH       = 500;
+      const generatedAt = new Date().toISOString();
+      const memberRows  = members.map(m => ({
         cluster_id: clusterId,
         address:    m.address,
         weight:     round4(m.weight),
+        metadata: {
+          methodology_version:       METHODOLOGY_VERSION,
+          assigned_cluster_type:     clusterType,
+          window_days:               windowDays,
+          total_movements:           m.counts.total,
+          exchange_deposit_count:    m.counts.exchange_deposit,
+          exchange_withdrawal_count: m.counts.exchange_withdrawal,
+          stake_count:               m.counts.stake,
+          defi_deposit_count:        m.counts.defi_deposit,
+          defi_withdrawal_count:     m.counts.defi_withdrawal,
+          total_value_usd:           m.balance.total_value_usd,
+          staked_total:              m.balance.staked_total,
+          generated_at:              generatedAt,
+        },
       }));
 
       for (let i = 0; i < memberRows.length; i += BATCH) {

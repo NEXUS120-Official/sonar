@@ -142,6 +142,7 @@ export interface WalletClusterMemberRow {
   cluster_id: string;
   address:    string;
   weight:     number;  // 0.0–1.0 normalized strength score (behavior_v1)
+  metadata:   Json | null; // per-member supporting metrics — added by migration 011
   added_at:   string;
 }
 
