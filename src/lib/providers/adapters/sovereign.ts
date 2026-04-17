@@ -39,7 +39,9 @@ import type {
   SubscribeAccountsOptions,
   SubscribeSlotsOptions,
 } from '../interfaces';
-import { ProviderError } from '../interfaces';
+import { ProviderError }                from '../interfaces';
+import { resolveAddress, toWalletProfile } from '@/lib/entity-graph';
+import { createAdminClient }              from '@/lib/supabase/server';
 
 // ── NOT_OPERATIONAL stream helper ─────────────────────────────
 // Mirrors notImplementedStream in helius-stream.ts, but uses a
@@ -114,15 +116,13 @@ export class SovereignSolanaProvider implements HistoricalProvider, WalletIntelP
     );
   }
 
-  async getWalletProfile(_address: string): Promise<WalletProfile | null> {
-    // Future: owned entirely by SONAR's internal entity graph layer.
-    // Query: entity_addresses → entities for label + entity_type.
-    // No external provider call. Confidence score from entities.confidence.
-    // When entity graph is populated this becomes a pure DB read.
-    throw new ProviderError(
-      'sovereign_solana', 'NOT_OPERATIONAL',
-      'getWalletProfile: entity graph layer not yet wired — implement entity_addresses lookup',
-    );
+  async getWalletProfile(address: string): Promise<WalletProfile | null> {
+    // Owned entirely by SONAR's internal entity graph layer.
+    // Pure DB read: entity_addresses → entities. No external provider call.
+    // Returns null for unknown addresses — callers must handle null explicitly.
+    const entity = await resolveAddress(address, createAdminClient());
+    if (!entity) return null;
+    return toWalletProfile(address, entity);
   }
 
   async discoverWhales(

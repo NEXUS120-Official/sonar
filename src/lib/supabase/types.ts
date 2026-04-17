@@ -52,6 +52,41 @@ export type UserTier = 'free' | 'pro';
 
 // ── Table row types ───────────────────────────────────────────
 
+export type EntityType =
+  | 'exchange'
+  | 'protocol'
+  | 'whale'
+  | 'market_maker'
+  | 'bridge'
+  | 'treasury'
+  | 'unknown';
+
+export interface EntityRow {
+  id:             string;
+  entity_type:    EntityType;
+  canonical_name: string | null;
+  description:    string | null;
+  confidence:     number;          // 0-100
+  verified:       boolean;
+  source:         string | null;   // 'manual' | 'on-chain-analysis' | 'gmgn' | 'known_addresses_seed' | ...
+  metadata:       Json | null;
+  created_at:     string;
+  updated_at:     string;
+}
+
+export interface EntityAddressRow {
+  id:         string;
+  entity_id:  string;
+  address:    string;
+  chain:      string;
+  label:      string | null;   // 'hot_wallet' | 'cold_wallet' | 'vault' | 'fee_account' | ...
+  confidence: number;          // 0-100
+  is_active:  boolean;
+  source:     string | null;
+  notes:      string | null;
+  created_at: string;
+}
+
 export interface KnownAddressRow {
   id: string;
   address: string;

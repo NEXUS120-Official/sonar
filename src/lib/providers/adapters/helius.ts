@@ -25,6 +25,8 @@ import type {
 import { ProviderError } from '../interfaces';
 import { getBatchSolBalances, getUsdcBalance } from '@/lib/whale-discovery/balance-checker';
 import { resolveSolPriceUsd } from '@/lib/price-engine';
+import { resolveAddress, toWalletProfile } from '@/lib/entity-graph';
+import { createAdminClient } from '@/lib/supabase/server';
 import type { HeliusEnhancedTx } from '@/lib/helius/parse-movement';
 
 // ── Config ────────────────────────────────────────────────────
@@ -178,9 +180,11 @@ export class HeliusWalletProvider implements WalletIntelProvider {
   }
 
   async getWalletProfile(address: string): Promise<WalletProfile | null> {
-    // Helius doesn't expose a direct profiling endpoint on free tier.
-    // Labels are resolved from known_addresses table in DB.
-    return null;
+    // Resolved entirely from SONAR's internal entity graph (entity_addresses → entities).
+    // No Helius API call — entity graph is mode-agnostic and works in external/hybrid/sovereign.
+    const entity = await resolveAddress(address, createAdminClient());
+    if (!entity) return null;
+    return toWalletProfile(address, entity);
   }
 
   async discoverWhales(
