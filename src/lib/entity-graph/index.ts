@@ -36,6 +36,7 @@
 
 import type { createAdminClient } from '@/lib/supabase/server';
 import type { WalletProfile }      from '@/lib/providers/interfaces';
+import { getUnmappedWhaleCount, getUnmappedKnownAddressCount } from './seeding';
 
 type Db = ReturnType<typeof createAdminClient>;
 
@@ -90,10 +91,17 @@ export interface AddressBehaviorContext {
 
 /** Entity graph coverage statistics for internal audit. */
 export interface EntityCoverageStats {
-  total_entities:   number;
-  by_entity_type:   Record<string, number>;
-  total_addresses:  number;  // total entity_addresses rows
-  active_addresses: number;
+  total_entities:           number;
+  by_entity_type:           Record<string, number>;
+  by_source:                Record<string, number>; // entity_addresses rows by source field
+  total_addresses:          number;  // total entity_addresses rows
+  active_addresses:         number;
+  // Quality signals
+  unverified_entities:      number;  // entities where verified=false
+  low_confidence_mappings:  number;  // entity_addresses where confidence < 70
+  // Gap signals — how many rows exist in trusted sources but are not yet mapped
+  unmapped_whales:          number;
+  unmapped_known_addresses: number;
   // Top from_addresses in recent movements not covered by entity_addresses
   uncovered_hot: Array<{
     address:          string;
@@ -469,6 +477,11 @@ export async function getEntityCoverage(
     { data: addrCountRows },
     { data: activeAddrRows },
     { data: recentMovs },
+    { data: unverifiedRows },
+    { data: sourceRows },
+    { data: lowConfRows },
+    unmapped_whales,
+    unmapped_known_addresses,
   ] = await Promise.all([
     dba.from('entities').select('entity_type'),
     dba.from('entity_addresses').select('id', { count: 'exact', head: true }),
@@ -478,12 +491,28 @@ export async function getEntityCoverage(
       .not('from_address', 'is', null)
       .order('block_time', { ascending: false })
       .limit(sampleSize),
+    // Quality: unverified entities
+    dba.from('entities').select('id', { count: 'exact', head: true }).eq('verified', false),
+    // Quality: entity_addresses by source (for by_source breakdown)
+    dba.from('entity_addresses').select('source'),
+    // Quality: low-confidence address mappings
+    dba.from('entity_addresses').select('id', { count: 'exact', head: true }).lt('confidence', 70),
+    // Gap: unmapped whales + known_addresses (uses seeding.ts helpers)
+    getUnmappedWhaleCount(db),
+    getUnmappedKnownAddressCount(db),
   ]);
 
   // Count entities by type
   const by_entity_type: Record<string, number> = {};
   for (const row of (entityRows ?? []) as Array<{ entity_type: string }>) {
     by_entity_type[row.entity_type] = (by_entity_type[row.entity_type] ?? 0) + 1;
+  }
+
+  // Count entity_addresses by source
+  const by_source: Record<string, number> = {};
+  for (const row of (sourceRows ?? []) as Array<{ source: string | null }>) {
+    const src = row.source ?? 'unknown';
+    by_source[src] = (by_source[src] ?? 0) + 1;
   }
 
   // Group movements by from_address in JS
@@ -523,10 +552,15 @@ export async function getEntityCoverage(
     }));
 
   return {
-    total_entities:   entityRows?.length ?? 0,
+    total_entities:           entityRows?.length ?? 0,
     by_entity_type,
-    total_addresses:  (addrCountRows as any)?.count ?? 0,
-    active_addresses: (activeAddrRows as any)?.count ?? 0,
+    by_source,
+    total_addresses:          (addrCountRows as any)?.count ?? 0,
+    active_addresses:         (activeAddrRows as any)?.count ?? 0,
+    unverified_entities:      (unverifiedRows as any)?.count ?? 0,
+    low_confidence_mappings:  (lowConfRows as any)?.count ?? 0,
+    unmapped_whales,
+    unmapped_known_addresses,
     uncovered_hot,
   };
 }

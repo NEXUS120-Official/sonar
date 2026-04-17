@@ -20,6 +20,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { resolveAddressBatch } from '@/lib/entity-graph';
 import type { FlowSnapshotRow, AlertRow, MovementRow, AlertType } from '@/lib/supabase/types';
 
 // ── Auth ──────────────────────────────────────────────────────
@@ -101,24 +102,31 @@ interface WeeklyReport {
     by_type: Record<string, number>;
   };
   top_moves: {
-    flow_type: string;
-    token: string;
-    amount_usd: number;
-    exchange: string | null;
-    protocol: string | null;
-    block_time: string;
+    flow_type:   string;
+    token:       string;
+    amount_usd:  number;
+    exchange:    string | null;
+    protocol:    string | null;
+    block_time:  string;
+    entity_name: string | null;
   }[];
   publish_text: string;
 }
 
 function buildPublishText(r: Omit<WeeklyReport, 'publish_text'>): string {
   const {
-    week, exchange_recap: ex, staking_recap: st, bias_trend: bt, alerts_summary: al,
+    week, exchange_recap: ex, staking_recap: st, bias_trend: bt, alerts_summary: al, top_moves,
   } = r;
 
   const avgBias   = bt.avg_score;
   const direction = avgBias > 10 ? 'BULLISH' : avgBias < -10 ? 'BEARISH' : 'NEUTRAL';
   const netLabel  = ex.direction === 'accumulation' ? 'net accumulation' : ex.direction === 'distribution' ? 'net distribution' : 'balanced';
+
+  const topMoveLines = top_moves.slice(0, 5).map(m => {
+    const actor    = m.entity_name ?? m.exchange ?? m.protocol ?? null;
+    const actorStr = actor ? ` — ${actor}` : '';
+    return `  • ${m.flow_type.replace(/_/g, ' ')} ${fmtUsd(m.amount_usd)}${actorStr}`;
+  });
 
   const lines = [
     `SONAR Weekly Intelligence — ${week}`,
@@ -136,6 +144,8 @@ function buildPublishText(r: Omit<WeeklyReport, 'publish_text'>): string {
     '',
     `Alerts fired: ${al.total}`,
     ...Object.entries(al.by_type).map(([t, n]) => `  ${t}: ${n}`),
+    ...(topMoveLines.length > 0 ? ['', 'Top moves:'] : []),
+    ...topMoveLines,
   ].filter(l => l !== '');
 
   return lines.join('\n');
@@ -188,17 +198,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const alerts = (alertsRaw ?? []) as Pick<AlertRow, 'alert_type' | 'severity' | 'created_at'>[];
 
-  // ── 4. Load top 10 movements by USD ──────────────────────────
+  // ── 4. Load top 10 movements by USD (+ from_address for entity lookup) ──
   const { data: topMovesRaw } = await db
     .from('movements')
-    .select('flow_type, token, amount_usd, exchange, protocol, block_time')
+    .select('flow_type, token, amount_usd, exchange, protocol, block_time, from_address')
     .gte('block_time', periodStart.toISOString())
     .order('amount_usd', { ascending: false })
     .limit(10);
 
-  const topMoves = (topMovesRaw ?? []) as Pick<
-    MovementRow, 'flow_type' | 'token' | 'amount_usd' | 'exchange' | 'protocol' | 'block_time'
-  >[];
+  type TopMoveRow = Pick<MovementRow, 'flow_type' | 'token' | 'amount_usd' | 'exchange' | 'protocol' | 'block_time' | 'from_address'>;
+  const topMoveRows = (topMovesRaw ?? []) as TopMoveRow[];
+
+  // Entity resolution for top move addresses (single batch)
+  const topMoveAddrs = [...new Set(topMoveRows.map(m => m.from_address).filter((a): a is string => Boolean(a)))];
+  const topMoveEntityMap = topMoveAddrs.length > 0
+    ? await resolveAddressBatch(topMoveAddrs, db)
+    : new Map();
 
   // ── 5. Compute exchange_recap ─────────────────────────────────
   const totalExchangeInflow  = snapshots.reduce((s, r) => s + r.sol_exchange_inflow_usd,  0);
@@ -281,14 +296,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       total:   alerts.length,
       by_type: byType,
     },
-    top_moves: topMoves.map(m => ({
-      flow_type:  m.flow_type,
-      token:      m.token,
-      amount_usd: m.amount_usd ?? 0,
-      exchange:   m.exchange,
-      protocol:   m.protocol,
-      block_time: m.block_time,
-    })),
+    top_moves: topMoveRows.map(m => {
+      const entity      = m.from_address ? topMoveEntityMap.get(m.from_address) ?? null : null;
+      const entity_name = entity?.canonical_name ?? entity?.label ?? null;
+      return {
+        flow_type:   m.flow_type,
+        token:       m.token,
+        amount_usd:  m.amount_usd ?? 0,
+        exchange:    m.exchange,
+        protocol:    m.protocol,
+        block_time:  m.block_time,
+        entity_name,
+      };
+    }),
   };
 
   const publish_text = buildPublishText(reportData);
