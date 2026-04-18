@@ -391,6 +391,58 @@ export interface ShadowLinkRow {
   last_updated_at:           string;
 }
 
+export interface ShadowFamilyRow {
+  family_id:                string;
+  root_wallet:              string;
+  source_exchange:          string | null;
+  source_exchange_wallet:   string | null;
+  member_wallets:           string[];
+  total_members:            number;
+  hop_depth:                number;
+  patterns:                 string[];
+  continuity_reasons:       string[];
+  evidence:                 string[];
+  confidence:               number;
+  confidence_tier:          string;
+  has_privacy_activation:   boolean;
+  has_token2022_activity:   boolean;
+  has_gas_funding:          boolean;
+  has_fan_out:              boolean;
+  has_fan_in:               boolean;
+  has_temporal_correlation: boolean;
+  earliest_activity:        string | null;
+  latest_activity:          string | null;
+  methodology_version:      string;
+  first_detected_at:        string;
+  last_updated_at:          string;
+}
+
+export interface ShadowContinuityRow {
+  id:                       string;
+  family_id:                string;
+  parent_wallet:            string;
+  child_wallet:             string;
+  hop_depth:                number;
+  pattern:                  string;
+  transfer_signature:       string | null;
+  transfer_time:            string | null;
+  transfer_amount_sol:      number | null;
+  transfer_amount_usd:      number | null;
+  is_gas_topup:             boolean;
+  parent_has_shadow_link:   boolean;
+  parent_shadow_exchange:   string | null;
+  parent_shadow_confidence: number | null;
+  child_privacy_activated:  boolean;
+  child_token2022_active:   boolean;
+  evidence:                 string[];
+  linkage_reason:           string;
+  confidence:               number;
+  confidence_tier:          string;
+  methodology_version:      string;
+  first_detected_at:        string;
+  last_updated_at:          string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
