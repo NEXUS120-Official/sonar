@@ -304,6 +304,61 @@ export interface SovereignMintEnrichmentRow {
   updated_at:                string;
 }
 
+export interface SovereignSignalRow {
+  id:                     string;
+  signature:              string;
+  persisted_at:           string;
+  enriched_at:            string;
+  methodology_version:    string;
+  block_time:             string | null;
+  from_address:           string | null;
+  to_address:             string | null;
+  amount_token:           number | null;
+  amount_usd:             number | null;
+  token_mint:             string | null;
+  token_symbol:           string | null;
+  flow_type:              string | null;
+  flow_direction:         string | null;
+  exchange:               string | null;
+  protocol:               string | null;
+  from_entity_name:       string | null;
+  from_entity_type:       string | null;
+  from_entity_confidence: number;
+  from_entity_verified:   boolean;
+  to_entity_name:         string | null;
+  to_entity_type:         string | null;
+  to_entity_confidence:   number;
+  to_entity_verified:     boolean;
+  whale_entity_name:      string | null;
+  whale_entity_type:      string | null;
+  whale_entity_confidence:number;
+  whale_entity_verified:  boolean;
+  token_program_type:             string;
+  is_token_2022:                  boolean;
+  has_transfer_fee:               boolean;
+  has_confidential_transfer:      boolean;
+  has_transfer_hook:              boolean;
+  has_permanent_delegate:         boolean;
+  has_auditor_key:                boolean;
+  token_security_confidence:      string;
+  token_risk_flags:               string[];
+  fog_piercing_notes:             string[];
+  cluster_id:             string | null;
+  cluster_type:           string | null;
+  cluster_name:           string | null;
+  has_shadow_link:        boolean;
+  shadow_source_exchange: string | null;
+  shadow_confidence:      number | null;
+  shadow_linkage_reason:  string | null;
+  signal_score:           number;
+  signal_confidence:      string;
+  evidence:               string[];
+  attribution_reason:     string | null;
+  raw_movement:           Json | null;
+  raw_token_movement:     Json | null;
+  created_at:             string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -385,6 +440,15 @@ export interface Database {
         Row: SovereignMintEnrichmentRow;
         Insert: Omit<SovereignMintEnrichmentRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
         Update: Partial<Omit<SovereignMintEnrichmentRow, 'id'>>;
+      };
+      sovereign_signals: {
+        Row: SovereignSignalRow;
+        Insert: Omit<SovereignSignalRow, 'id' | 'persisted_at' | 'created_at'> & {
+          id?: string;
+          persisted_at?: string;
+          created_at?: string;
+        };
+        Update: Partial<Omit<SovereignSignalRow, 'id'>>;
       };
       gmgn_smart_money_cache: {
         Row: GmgnSmartMoneyCacheRow;
