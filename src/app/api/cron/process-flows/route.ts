@@ -28,6 +28,7 @@ import {
 import { calculateBiasIndex }                from '@/lib/signal-engine';
 import { detectAnomalies, type AlertInsert } from '@/lib/signal-engine';
 import { type RecentAlertMap }               from '@/lib/signal-engine';
+import { buildCohortContext }                from '@/lib/signal-engine';
 import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
 import { buildPredictionFeatures }           from '@/lib/feature-builder';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
@@ -258,11 +259,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 4c. Build prediction features ──────────────────────────
   // Derives and upserts prediction_features rows for all horizons.
   // Non-critical: wrapped in try/catch so a failure never kills the cron.
+  //
+  // clusterMemberMap is hoisted to outer scope so section 5 (anomaly
+  // detection) can use it for per-alert cohort attribution context.
+  let clusterMemberMap: Map<string, string> | undefined;
+
   if (snapshot4h && biasResult) {
     // Load cluster member map for cohort-aware feature scoring.
     // One read per cron tick — addresses → cluster_type.
     // Failures are non-fatal: missing map → placeholder score used.
-    let clusterMemberMap: Map<string, string> | undefined;
     try {
       const { data: clusterMembers } = await (db as any)
         .from('wallet_cluster_members')
@@ -332,17 +337,101 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       recentAlerts,
     });
 
-    if (anomalies.length > 0) {
-      log('info', `${anomalies.length} anomalies — enriching with AI`);
+    // ── Enrich alerts with cohort attribution context ─────────
+    // Additive, non-critical: merges cohort_context into alert.data.
+    // Counts unique cluster-member wallet addresses only (exchange/protocol
+    // counterparties are never in clusterMemberMap). Falls back to the
+    // unmodified alert when map is unavailable or no members matched.
+    const anomaliesWithCohort: AlertInsert[] = anomalies.map(alert => {
+      if (!clusterMemberMap || clusterMemberMap.size === 0) return alert;
+      const cohortCtx = buildCohortContext(movements4h, clusterMemberMap, alert.alert_type);
+      if (!cohortCtx) return alert;
+      const existingData =
+        alert.data && typeof alert.data === 'object' && !Array.isArray(alert.data)
+          ? (alert.data as Record<string, unknown>)
+          : {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { ...alert, data: { ...existingData, cohort_context: cohortCtx } } as any as AlertInsert;
+    });
+
+    if (anomaliesWithCohort.length > 0) {
+      log('info', `${anomaliesWithCohort.length} anomalies — enriching with AI`);
 
       // Enrich alerts with AI analysis
       const enriched: AlertInsert[] = await Promise.all(
-        anomalies.map(async (alert) => {
+        anomaliesWithCohort.map(async (alert) => {
+
+          // ── Cohort narrative (pre-AI body enrichment) ───────────
+          // Extract cohort_context written by the prior enrichment step.
+          // Only surfaces when dominant_unique_wallets >= 3 (meaningful cluster evidence).
+          // Body is enriched before generateAlertAnalysis so the cohort line
+          // is deterministic — present even when AI falls back to the template.
+          const COHORT_MIN_WALLETS = 3;
+
+          type RawCohortCtx = {
+            dominant_cluster_label:       string | null;
+            dominant_unique_wallets:      number;
+            total_unique_cluster_wallets: number;
+          };
+
+          const rawData = alert.data;
+          const cohortCtx: RawCohortCtx | null =
+            rawData &&
+            typeof rawData === 'object' &&
+            !Array.isArray(rawData) &&
+            'cohort_context' in rawData
+              ? (rawData as Record<string, unknown>).cohort_context as RawCohortCtx
+              : null;
+
+          const dominantCount = cohortCtx?.dominant_unique_wallets ?? 0;
+          const totalCount    = cohortCtx?.total_unique_cluster_wallets ?? 0;
+          const label         = cohortCtx?.dominant_cluster_label ?? null;
+
+          // Dominant share: what fraction of all active cluster wallets
+          // belong to the leading cohort. Included when > 0 to avoid /0.
+          const sharePct = totalCount > 0
+            ? Math.round((dominantCount / totalCount) * 100)
+            : 0;
+          const shareStr = sharePct > 0 ? ` (${sharePct}% of active cluster wallets)` : '';
+
+          // Alert-type-specific wording; null when evidence is below threshold.
+          let cohortLine: string | null = null;
+          if (label && dominantCount >= COHORT_MIN_WALLETS) {
+            switch (alert.alert_type) {
+              case 'accumulation_wave':
+                cohortLine = `Cluster attribution: ${dominantCount} ${label} led this flow${shareStr}.`;
+                break;
+              case 'distribution_wave':
+                cohortLine = `Cluster attribution: ${dominantCount} ${label} led this flow${shareStr}.`;
+                break;
+              case 'staking_shift':
+                cohortLine = `Cluster attribution: ${label} cohort was the most active (${dominantCount} wallets${shareStr}).`;
+                break;
+              case 'exchange_spike':
+              case 'flow_reversal':
+                cohortLine = `Most active cohort: ${label} (${dominantCount} wallets${shareStr}).`;
+                break;
+              default:
+                cohortLine = null;
+            }
+          }
+
+          const enrichedBody = cohortLine ? `${alert.body}\n${cohortLine}` : alert.body;
+
+          // Additional metrics passed to AI so it can reference cluster evidence.
+          const cohortMetrics: Record<string, number | string> = cohortLine && label
+            ? {
+                dominant_cluster:         label,
+                dominant_cluster_wallets: dominantCount,
+                total_cluster_wallets:    totalCount,
+              }
+            : {};
+
           try {
             const analysis = await generateAlertAnalysis({
               alert_type:   alert.alert_type,
               title:        alert.title,
-              body:         alert.body,
+              body:         enrichedBody,
               window_hours: 4,
               metrics: {
                 net_exchange_flow_usd: snapshot4h.sol_net_exchange_flow_usd,
@@ -353,11 +442,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 market_bias:           snapshot4h.market_bias ?? 'neutral',
                 large_movements_count: snapshot4h.large_movements_count,
                 unique_whales_active:  snapshot4h.unique_whales_active,
+                ...cohortMetrics,
               },
             });
-            return { ...alert, ai_analysis: analysis };
+            return { ...alert, body: enrichedBody, ai_analysis: analysis };
           } catch {
-            return alert;
+            return { ...alert, body: enrichedBody };
           }
         }),
       );
