@@ -33,6 +33,15 @@ import { generateAlertAnalysis }             from '@/lib/ai/alert-writer';
 import { buildPredictionFeatures }           from '@/lib/feature-builder';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
 import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistoryRow } from '@/lib/supabase/types';
+import { createBoundPersistenceManager }     from '@/lib/sovereign/persistence-manager';
+import { joinAndAcceptBatch }                from '@/lib/sovereign/persistence-manager';
+import { loadJoinerShadowMap }               from '@/lib/sovereign/shadow-linker';
+import {
+  evaluateSignalsForAlerts,
+  consolidateAlerts,
+  decisionToAlertInsert,
+}                                            from '@/lib/sovereign/alert-engine';
+import type { NormalizedOutput }             from '@/lib/normalizer';
 
 // ── Logging ───────────────────────────────────────────────────
 
@@ -97,6 +106,37 @@ function snapshotToMetrics(s: SnapshotInsert): FlowMetrics {
 
 function rowToMetrics(r: FlowSnapshotRow): FlowMetrics {
   return snapshotToMetrics(r as unknown as SnapshotInsert);
+}
+
+// ── Helper: bridge MovementRow → NormalizedOutput for joiner ──
+// MovementRow is the DB representation (already decoded + stored).
+// NormalizedOutput is what the Sovereign Flow Joiner expects.
+// Token movement context is not available here (already persisted
+// separately); joiner degrades gracefully with tokenMovement=null.
+
+function movementRowToNormalizedOutput(row: MovementRow): NormalizedOutput {
+  return {
+    signature: row.signature,
+    movement: {
+      signature:      row.signature,
+      from_address:   row.from_address,
+      to_address:     row.to_address,
+      from_label:     row.from_label,
+      to_label:       row.to_label,
+      whale_id:       row.whale_id,
+      token:          row.token,
+      amount_token:   row.amount_token,
+      amount_usd:     row.amount_usd,
+      flow_type:      row.flow_type,
+      flow_direction: row.flow_direction,
+      exchange:       row.exchange,
+      protocol:       row.protocol,
+      block_time:     row.block_time,
+    },
+    tokenMovement:    null,
+    whaleAddressHint: null,
+    skipped:          false,
+  };
 }
 
 // ── Main handler ──────────────────────────────────────────────
@@ -305,6 +345,113 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch (err) {
       log('warn', `Feature builder failed (non-critical): ${String(err)}`);
     }
+  }
+
+  // ── 4d. Sovereign intelligence pipeline ──────────────────────
+  // Wire movement rows through the Sovereign Flow Joiner, persist
+  // enriched signals, and evaluate for intelligence-grade alerts.
+  //
+  // Execution contract:
+  //   1. Filter movements4h to significant flows (>= $10K)
+  //   2. Load shadow map for all wallet addresses
+  //   3. joinAndAcceptBatch() — join + enqueue (no flush yet)
+  //   4. peekBuffer() → evaluateSignalsForAlerts() — pure eval
+  //   5. consolidateAlerts() → decisionToAlertInsert() → DB
+  //   6. manager.flush() — persist sovereign_signals
+  //
+  // Non-critical: wrapped in try/catch; failures never kill the cron.
+  // Sovereign alerts are additive to anomaly-detector alerts (no dedup
+  // against each other — different intelligence surfaces).
+
+  try {
+    const MIN_SOVEREIGN_USD  = 10_000;
+    const significantRows    = movements4h.filter(r => (r.amount_usd ?? 0) >= MIN_SOVEREIGN_USD);
+
+    if (significantRows.length > 0) {
+      const normalized = significantRows.map(movementRowToNormalizedOutput);
+
+      // Collect unique addresses for shadow map lookup
+      const addrSet = new Set<string>();
+      for (const r of significantRows) {
+        if (r.from_address) addrSet.add(r.from_address);
+        if (r.to_address)   addrSet.add(r.to_address);
+      }
+
+      // Load shadow map — falls back to empty map on error
+      let shadowMap = await loadJoinerShadowMap([...addrSet], db).catch(() => new Map());
+
+      // Bind persistence manager — flushes to sovereign_signals table
+      const manager = createBoundPersistenceManager(db, { batchSizeThreshold: 200 });
+
+      // Join + enqueue; do NOT flush yet (need peekBuffer for alert eval)
+      const joinResult = await joinAndAcceptBatch(normalized, manager, db, {
+        shadowMap,
+        flushAfter: false,
+      });
+      log('info', `Sovereign join: ${joinResult.accepted} accepted, ${joinResult.skipped} skipped`);
+
+      // Evaluate in-memory buffer for intelligence-grade alerts
+      if (joinResult.accepted > 0) {
+        const buffer = manager.peekBuffer();
+
+        // Build dedup key set from recently fired sovereign alerts.
+        // Independent query scoped to sovereign types only — avoids
+        // coupling to section 5's recentAlerts which isn't in scope yet.
+        const SOVEREIGN_ALERT_TYPES = [
+          'shadow_whale_inflow', 'exchange_shadow_birth',
+          'privacy_token_activity', 'cluster_synchronized_flow',
+          'sovereign_high_confidence',
+        ];
+        const sovereignCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
+        const { data: recentSovereignRaw } = await db
+          .from('alerts')
+          .select('alert_type, data')
+          .in('alert_type', SOVEREIGN_ALERT_TYPES)
+          .gte('created_at', sovereignCutoff)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        const recentSovereignKeys = new Set<string>(
+          ((recentSovereignRaw ?? []) as Array<{ alert_type: string; data: unknown }>)
+            .map(r => {
+              const d = r.data as Record<string, unknown> | null;
+              return typeof d?.consolidation_key === 'string' ? d.consolidation_key : '';
+            })
+            .filter(Boolean),
+        );
+
+        const candidates = evaluateSignalsForAlerts(buffer, recentSovereignKeys);
+        const decisions  = consolidateAlerts(candidates);
+
+        if (decisions.length > 0) {
+          const sovereignAlerts = decisions.map(decisionToAlertInsert);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: insertedSovereign, error: sovereignErr } = await db
+            .from('alerts')
+            .insert(sovereignAlerts as any)
+            .select('id');
+
+          if (sovereignErr) {
+            log('warn', `Sovereign alert insert failed (non-critical): ${sovereignErr.message}`);
+          } else {
+            const count = insertedSovereign?.length ?? 0;
+            alerts_generated += count;
+            log('info', `${count} sovereign alert(s) written (${decisions.map(d => d.archetype).join(', ')})`);
+          }
+        } else {
+          log('info', 'Sovereign pipeline: no alert candidates above threshold');
+        }
+      }
+
+      // Flush enriched signals to sovereign_signals table
+      const flushResult = await manager.flush();
+      log('info', `Sovereign signals flushed: ${flushResult.written} written, ${flushResult.failed} failed, ${flushResult.deferred} deferred`);
+    } else {
+      log('info', `Sovereign pipeline: no significant movements (< $${MIN_SOVEREIGN_USD.toLocaleString()}) in 4h window`);
+    }
+  } catch (err) {
+    log('warn', `Sovereign intelligence pipeline failed (non-critical): ${String(err)}`);
   }
 
   // ── 5. Anomaly detection (on 4h window — sensitive but not noisy) ──

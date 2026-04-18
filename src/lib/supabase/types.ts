@@ -34,7 +34,13 @@ export type AlertType =
   | 'whale_large_move'
   | 'weekly_report'
   | 'token_accumulation'
-  | 'smart_money_token_buy';
+  | 'smart_money_token_buy'
+  // ── Sovereign intelligence archetypes (Block 24) ─────────────
+  | 'shadow_whale_inflow'         // shadow-linked wallet receives large inflow
+  | 'exchange_shadow_birth'       // exchange-funded wallet activates privacy
+  | 'privacy_token_activity'      // Token-2022 confidential transfer activity
+  | 'cluster_synchronized_flow'   // cluster-member coordinated positioning
+  | 'sovereign_high_confidence';  // joiner direct_proof / strong_evidence
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 

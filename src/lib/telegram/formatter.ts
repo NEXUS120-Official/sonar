@@ -52,6 +52,12 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   weekly_report:           '📊 Weekly Report',
   token_accumulation:      '🎯 Token Accumulation',
   smart_money_token_buy:   '🧠 Smart Money Buy',
+  // ── Sovereign intelligence archetypes ─────────────────────────
+  shadow_whale_inflow:       '🕵️ Shadow Whale Inflow',
+  exchange_shadow_birth:     '🔗 Exchange Shadow Birth',
+  privacy_token_activity:    '🔒 Privacy Token Activity',
+  cluster_synchronized_flow: '🔄 Cluster Synchronized Flow',
+  sovereign_high_confidence: '🛡️ Sovereign Signal',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────
