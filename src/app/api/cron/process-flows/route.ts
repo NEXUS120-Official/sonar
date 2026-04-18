@@ -399,6 +399,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (joinResult.accepted > 0) {
         const buffer = manager.peekBuffer();
 
+        // ── Family intelligence summary log ───────────────────────
+        // Log-only: validates that shadow_family_* fields are being populated.
+        // Not user-facing; helps calibrate coverage before runtime tuning.
+        {
+          const familyLinked  = buffer.filter(s => s.shadow_family_id !== null);
+          const distinctFams  = new Set(familyLinked.map(s => s.shadow_family_id)).size;
+          const fanOutCount   = familyLinked.filter(s => s.shadow_family_has_fan_out).length;
+          const gasCount      = familyLinked.filter(s => s.shadow_family_has_gas_funding).length;
+          log('info',
+            `Family summary: ${familyLinked.length}/${buffer.length} signals family-linked, ` +
+            `${distinctFams} distinct families, ${fanOutCount} fan-out, ${gasCount} gas-funding`,
+          );
+        }
+
         // Build dedup key set from recently fired sovereign alerts.
         // Independent query scoped to sovereign types only — avoids
         // coupling to section 5's recentAlerts which isn't in scope yet.

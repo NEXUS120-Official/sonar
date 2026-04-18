@@ -93,6 +93,27 @@ const ENTITY_BONUS    = 10;
 const VOLUME_BONUS_LG = 10;  // >= $1M
 const VOLUME_BONUS_SM =  5;  // >= $100K
 
+// ── Family archetype promotion thresholds ─────────────────────
+// Conservative: family archetypes must clear these gates before
+// classification. Keeps shadow_family_fan_out and
+// shadow_gas_funding_chain rare and meaningful.
+//
+// Why conservative? Without runtime data we can't tune yet.
+// These prevent noise while Block 27 validates actual coverage.
+
+/** Minimum family confidence to promote to any family-specific archetype. */
+const MIN_FAMILY_CONF_FOR_ARCHETYPE = 30;
+
+/** Minimum member count for shadow_family_fan_out alert.
+ *  Mirrors the FAN_OUT_THRESHOLD in shadow-continuity.ts (≥3 children).
+ *  Set here explicitly so archetype is decoupled from the detector constant. */
+const MIN_FAN_OUT_MEMBERS_FOR_ALERT = 3;
+
+/** Minimum family confidence specifically for shadow_gas_funding_chain.
+ *  Lower than fan-out threshold — gas topup is a single direct signal
+ *  (less ambiguous than fan-out which could be benign multi-wallet use). */
+const MIN_GAS_CHAIN_CONF_FOR_ALERT = 25;
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function formatUsd(n: number): string {
@@ -170,13 +191,22 @@ function classifyArchetype(
     return 'cluster_synchronized_flow';
   }
 
-  // shadow_family_fan_out: family with ≥3 children (Block 26)
-  if (sig.shadow_family_id !== null && sig.shadow_family_has_fan_out) {
+  // shadow_family_fan_out: family with ≥3 children, confidence gate, member count gate
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_fan_out &&
+    (sig.shadow_family_confidence ?? 0) >= MIN_FAMILY_CONF_FOR_ARCHETYPE &&
+    (sig.shadow_family_total_members ?? 0) >= MIN_FAN_OUT_MEMBERS_FOR_ALERT
+  ) {
     return 'shadow_family_fan_out';
   }
 
-  // shadow_gas_funding_chain: family with gas-funding lineage (Block 26)
-  if (sig.shadow_family_id !== null && sig.shadow_family_has_gas_funding) {
+  // shadow_gas_funding_chain: gas-funding lineage with confidence gate
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_gas_funding &&
+    (sig.shadow_family_confidence ?? 0) >= MIN_GAS_CHAIN_CONF_FOR_ALERT
+  ) {
     return 'shadow_gas_funding_chain';
   }
 
@@ -214,6 +244,47 @@ function toConsolidationKey(archetype: AlertArchetype, sig: PersistableSovereign
     case 'sovereign_high_confidence':
       return `${archetype}::${sig.signal_confidence}`;
   }
+}
+
+// ── Family narrative formatter ────────────────────────────────
+// Generates intelligence-grade, hedged family context paragraph.
+// Does NOT overclaim — confidence tier drives the certainty phrase.
+
+function formatFamilyNarrative(sig: PersistableSovereignSignal): string {
+  const tier     = sig.shadow_family_confidence_tier ?? 'unknown';
+  const exchange = sig.shadow_family_source_exchange ?? 'unknown exchange';
+  const members  = sig.shadow_family_total_members   ?? 0;
+  const hopDepth = sig.shadow_family_hop_depth       ?? 1;
+  const conf     = sig.shadow_family_confidence      ?? 0;
+
+  // First continuity reason (most informative single-line context)
+  const topReason = sig.shadow_family_continuity_reasons[0] ?? null;
+
+  // Behavioral facets observed in the family
+  const facets: string[] = [];
+  if (sig.shadow_family_has_gas_funding)          facets.push('gas-funding');
+  if (sig.shadow_family_has_fan_out)              facets.push('fan-out');
+  if (sig.shadow_family_has_fan_in)               facets.push('fan-in convergence');
+  if (sig.shadow_family_has_temporal_correlation) facets.push('machine-like timing');
+  if (sig.shadow_family_has_privacy_activation)   facets.push('downstream privacy activation');
+  if (sig.shadow_family_has_token2022_activity)   facets.push('Token-2022 activity');
+
+  // Certainty phrasing — never overclaims below strong_evidence
+  const certainty =
+    tier === 'direct_proof'      ? 'confirmed'                         :
+    tier === 'strong_evidence'   ? 'strong evidence of'                :
+    tier === 'moderate_evidence' ? 'behavioral indicators consistent with' :
+    'weak association with';  // weak_association or unknown
+
+  const memberStr  = `${members} wallet${members !== 1 ? 's' : ''}`;
+  const facetStr   = facets.length > 0 ? ` Behavioral signals: ${facets.join(', ')}.` : '';
+  const reasonStr  = topReason ? ` Continuity: ${topReason}.` : '';
+
+  return (
+    `Family lineage: ${certainty} ${exchange}-anchored shadow family ` +
+    `(${memberStr}, hop depth ${hopDepth}, conf=${conf}, tier=${tier}).` +
+    reasonStr + facetStr
+  );
 }
 
 // ── Alert content builder ─────────────────────────────────────
@@ -280,24 +351,27 @@ function buildAlertContent(
     case 'shadow_family_fan_out': {
       const members  = sig.shadow_family_total_members ?? '?';
       const familyEx = sig.shadow_family_source_exchange ?? exch;
+      const narrative = formatFamilyNarrative(sig);
       return {
         title: `Shadow Family Fan-Out — ${members} Members via ${familyEx}`,
         body:
-          `Wallet belongs to a ${familyEx}-anchored shadow family with ${members} members ` +
-          `(fan-out pattern). Family confidence: ${sig.shadow_family_confidence ?? 0}. ` +
-          `${amtStr} flow ${from} → ${to}. Evidence: ${ev3}.`,
+          `Fan-out detected: wallet is part of a multi-wallet shadow family funded by ${familyEx}. ` +
+          `${amtStr} flow ${from} → ${to}. ` +
+          `${narrative} ` +
+          `Evidence: ${ev3}.`,
       };
     }
 
     case 'shadow_gas_funding_chain': {
       const familyEx2 = sig.shadow_family_source_exchange ?? exch;
-      const depth     = sig.shadow_family_hop_depth ?? 1;
+      const narrative = formatFamilyNarrative(sig);
       return {
         title: `Shadow Gas-Funding Chain — ${familyEx2} Origin`,
         body:
-          `Gas-funding lineage detected: ${familyEx2}-anchored root wallet funded this ` +
-          `wallet (hop depth: ${depth}). Family confidence: ${sig.shadow_family_confidence ?? 0}. ` +
-          `${amtStr} flow ${from} → ${to}. Evidence: ${ev3}.`,
+          `Gas-funding chain detected: this wallet received a small SOL topup from an ${familyEx2}-anchored root. ` +
+          `${amtStr} subsequent flow ${from} → ${to}. ` +
+          `${narrative} ` +
+          `Evidence: ${ev3}.`,
       };
     }
 
