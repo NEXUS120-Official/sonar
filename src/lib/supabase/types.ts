@@ -359,6 +359,32 @@ export interface SovereignSignalRow {
   created_at:             string;
 }
 
+export interface ShadowLinkRow {
+  id:                        string;
+  target_wallet:             string;
+  funding_signature:         string;
+  methodology_version:       string;
+  source_exchange:           string;
+  exchange_wallet:           string;
+  funding_time:              string;
+  funding_amount_usd:        number | null;
+  prior_movement_count:      number;
+  is_novel_wallet:           boolean;
+  privacy_activated:         boolean;
+  privacy_activation_time:   string | null;
+  time_gap_seconds:          number | null;
+  activated_mints:           string[];
+  has_confidential_transfer: boolean;
+  evidence_type:             string;
+  evidence:                  string[];
+  linkage_reason:            string;
+  entity_verified:           boolean;
+  confidence:                number;
+  confidence_tier:           string;
+  first_detected_at:         string;
+  last_updated_at:           string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -440,6 +466,15 @@ export interface Database {
         Row: SovereignMintEnrichmentRow;
         Insert: Omit<SovereignMintEnrichmentRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
         Update: Partial<Omit<SovereignMintEnrichmentRow, 'id'>>;
+      };
+      shadow_links: {
+        Row: ShadowLinkRow;
+        Insert: Omit<ShadowLinkRow, 'id' | 'first_detected_at' | 'last_updated_at'> & {
+          id?: string;
+          first_detected_at?: string;
+          last_updated_at?: string;
+        };
+        Update: Partial<Omit<ShadowLinkRow, 'id'>>;
       };
       sovereign_signals: {
         Row: SovereignSignalRow;
