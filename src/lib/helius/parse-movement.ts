@@ -251,7 +251,7 @@ export function parseMovement(
 
 // ── classify a single transfer by from/to ────────────────────
 
-interface TransferClassifyInput {
+export interface TransferClassifyInput {
   signature:           string;
   from:                string;
   to:                  string;
@@ -262,7 +262,7 @@ interface TransferClassifyInput {
   knownWhaleAddresses?: Set<string>;
 }
 
-function classifyTransfer(input: TransferClassifyInput): ParsedMovement | null {
+export function classifyTransfer(input: TransferClassifyInput): ParsedMovement | null {
   const { signature, from, to, token, amount, amountUsd, blockTime, knownWhaleAddresses } = input;
 
   // Skip wallet-to-self (e.g. wrap/unwrap)

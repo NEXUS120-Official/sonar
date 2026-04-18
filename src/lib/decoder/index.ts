@@ -68,30 +68,28 @@ export function txToRawRow(
 
 export const DECODER_VERSION = 'helius_enhanced_v1';
 
+export { decodeSovereignMovement }      from '@/lib/decoder/sovereign';
+export { decodeSovereignTokenMovement } from '@/lib/decoder/sovereign-token';
+
 /**
  * Returns whether this decoder can handle a raw_transactions row
  * based on its source field.
  *
- * 'sovereign_rpc' is listed here to open the source type and signal
- * intent. However, actual decode support for sovereign_rpc payloads
- * is NOT yet implemented: the raw_json shape produced by Agave RPC /
- * Yellowstone/Geyser differs from Helius enhanced transactions, so
- * attempting to decode a sovereign_rpc row with the current
- * decodeMovement / decodeTokenMovement functions will silently produce
- * wrong results or return null.
- *
- * Before sovereign_rpc rows reach the decoder in production, introduce
- * source-based dispatch here:
- *   if (source === 'sovereign_rpc') return decodeSovereignMovement(raw, ctx);
- *   if (source.startsWith('helius'))  return decodeHeliusMovement(raw, ctx);
- * and define decodeSovereignMovement() once the Agave raw_json shape
- * is finalised.
+ * Source dispatch in normalizer/index.ts:
+ *   source.startsWith('sovereign_rpc') → decodeSovereignMovement()
+ *     SOL and USDC flows via balance-delta extraction — OPERATIONAL.
+ *     SPL token movements deferred (tokenMovement = null).
+ *   source.startsWith('helius')        → decodeMovement() + decodeTokenMovement()
+ *     Full Helius enhanced-transaction decode — OPERATIONAL.
  */
 export function canDecode(source: string): boolean {
   return (
     source === 'helius_webhook'  ||
     source === 'helius_history'  ||
     source === 'helius_backfill' ||
-    source === 'sovereign_rpc'      // source type open; dispatch-by-source required before use
+    // sovereign_rpc sources: dispatch implemented in normalizer/index.ts.
+    // decodeSovereignMovement() handles SOL + USDC via balance-delta extraction.
+    source === 'sovereign_rpc'         ||  // direct getTransaction fetch
+    source === 'sovereign_rpc_history'    // getAddressHistory via historyToRawRow
   );
 }

@@ -1,27 +1,36 @@
 // ============================================================
-// SONAR — Sovereign Provider Stubs
+// SONAR — Sovereign Provider
 // ============================================================
 // SovereignSolanaProvider  — implements HistoricalProvider +
-//                            WalletIntelProvider via Agave RPC.
+//                            WalletIntelProvider via a standard
+//                            Solana JSON-RPC node.
 // SovereignChainStreamProvider — implements ChainStreamProvider
 //                            via Yellowstone/Geyser gRPC.
 //
-// Both classes satisfy their interfaces today but are NOT
-// OPERATIONAL: every method throws ProviderError with code
-// 'NOT_OPERATIONAL' until the underlying infrastructure is wired.
+// Operational status after Block 15:
+//   getTransaction()          OPERATIONAL (requires SOVEREIGN_RPC_URL)
+//   getMultipleTransactions()  OPERATIONAL (requires SOVEREIGN_RPC_URL)
+//   getAddressHistory()        OPERATIONAL (requires SOVEREIGN_RPC_URL)
+//   getWalletBalances()        OPERATIONAL (requires SOVEREIGN_RPC_URL)
+//   getWalletProfile()         OPERATIONAL (entity graph — no RPC needed)
+//   discoverWhales()           NOT_OPERATIONAL (raw_account_updates ranking not yet built)
+//   SovereignChainStreamProvider.*  NOT_OPERATIONAL (Yellowstone/Geyser not yet wired)
 //
-// NOT_OPERATIONAL vs NOT_IMPLEMENTED (elsewhere):
+// NOT_OPERATIONAL vs NOT_IMPLEMENTED:
 //   NOT_IMPLEMENTED  = method can never work here by design
-//                      (e.g. HeliusChainStreamProvider — push/pull mismatch)
 //   NOT_OPERATIONAL  = method IS the correct target; infrastructure
-//                      not yet wired (Agave RPC / Yellowstone not running)
+//                      not yet wired
 //
-// To make sovereign mode operational:
-//   1. Provision an Agave validator node (RPC + Geyser plugin).
-//   2. Set SOVEREIGN_RPC_URL and YELLOWSTONE_ENDPOINT env vars.
-//   3. Replace the throw bodies below with real client calls.
-//   4. Set CHAIN_PROVIDER_MODE=sovereign.
-//   No caller code changes required — providers/index.ts wires these in.
+// Raw archive:
+//   getTransaction + getAddressHistory write raw_transactions rows
+//   with source='sovereign_rpc' / 'sovereign_rpc_history'.
+//   The current Helius-format decoder CANNOT parse these payloads.
+//   Add source-based dispatch (decodeSovereignMovement) in
+//   src/lib/decoder before enabling normalization of sovereign rows.
+//
+// To activate sovereign mode:
+//   Set SOVEREIGN_RPC_URL=<your-rpc-endpoint>
+//   Set CHAIN_PROVIDER_MODE=sovereign
 // ============================================================
 
 import type {
@@ -39,9 +48,22 @@ import type {
   SubscribeAccountsOptions,
   SubscribeSlotsOptions,
 } from '../interfaces';
-import { ProviderError }                from '../interfaces';
-import { resolveAddress, toWalletProfile } from '@/lib/entity-graph';
-import { createAdminClient }              from '@/lib/supabase/server';
+import { ProviderError }                           from '../interfaces';
+import { resolveAddress, toWalletProfile }         from '@/lib/entity-graph';
+import { createAdminClient }                       from '@/lib/supabase/server';
+import { resolveSolPriceUsd }                      from '@/lib/price-engine';
+import { getSovereignRpcClient }                   from '@/lib/sovereign/rpc-client';
+import {
+  solTxToRawTransactionEvent,
+  solTxToAddressHistory,
+} from '@/lib/sovereign/transformers';
+
+// ── USDC mint (Solana mainnet) ─────────────────────────────────
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+// ── Concurrency config for multi-tx fetches ───────────────────
+const TX_FETCH_BATCH    = 5;    // concurrent getTransaction calls per batch
+const TX_FETCH_DELAY_MS = 100;  // ms between batches (rate-limit safety)
 
 // ── NOT_OPERATIONAL stream helper ─────────────────────────────
 // Mirrors notImplementedStream in helius-stream.ts, but uses a
@@ -62,64 +84,150 @@ function notOperationalStream<T>(method: string, detail: string): AsyncIterable<
   };
 }
 
+// ── Helper: require a configured RPC client ───────────────────
+// Centralises the NOT_OPERATIONAL error message so it is
+// consistent across methods and easy to grep.
+
+function requireRpcClient(method: string) {
+  const client = getSovereignRpcClient();
+  if (!client) {
+    throw new ProviderError(
+      'sovereign_solana', 'NOT_OPERATIONAL',
+      `${method}: SOVEREIGN_RPC_URL is not set`,
+    );
+  }
+  return client;
+}
+
 // ── SovereignSolanaProvider ───────────────────────────────────
 // Single class covers HistoricalProvider + WalletIntelProvider
-// because both are satisfied by the same Agave RPC connection.
-// External mode splits these across Helius + Helius; sovereign
-// mode collapses them to one node operator.
+// because both are satisfied by the same RPC connection.
 
 export class SovereignSolanaProvider implements HistoricalProvider, WalletIntelProvider {
   readonly name = 'sovereign_solana';
 
   // ── HistoricalProvider ──────────────────────────────────────
 
-  async getTransaction(_signature: string): Promise<RawTransactionEvent | null> {
-    // Future: Agave RPC `getTransaction` (jsonParsed, maxSupportedTransactionVersion=0).
-    // Raw payload archived to raw_transactions with source='sovereign_rpc'.
-    throw new ProviderError(
-      'sovereign_solana', 'NOT_OPERATIONAL',
-      'getTransaction: Agave RPC not yet wired — set SOVEREIGN_RPC_URL',
-    );
+  async getTransaction(signature: string): Promise<RawTransactionEvent | null> {
+    const client = requireRpcClient('getTransaction');
+    const tx = await client.getTransaction(signature);
+    if (!tx) return null;
+    return solTxToRawTransactionEvent(tx, signature);
   }
 
-  async getMultipleTransactions(_signatures: string[]): Promise<(RawTransactionEvent | null)[]> {
-    // Future: batch via Agave RPC `getTransactions` (added in v1.18).
-    // Fallback: sequential getTransaction calls with slot-based pagination.
-    // All payloads archived to raw_transactions with source='sovereign_rpc'.
-    throw new ProviderError(
-      'sovereign_solana', 'NOT_OPERATIONAL',
-      'getMultipleTransactions: Agave RPC not yet wired — set SOVEREIGN_RPC_URL',
-    );
+  async getMultipleTransactions(
+    signatures: string[],
+  ): Promise<(RawTransactionEvent | null)[]> {
+    if (signatures.length === 0) return [];
+
+    const client  = requireRpcClient('getMultipleTransactions');
+    const results: (RawTransactionEvent | null)[] = [];
+
+    for (let i = 0; i < signatures.length; i += TX_FETCH_BATCH) {
+      const batch = signatures.slice(i, i + TX_FETCH_BATCH);
+
+      const settled = await Promise.allSettled(
+        batch.map(sig => client.getTransaction(sig)),
+      );
+
+      for (let j = 0; j < batch.length; j++) {
+        const r = settled[j];
+        if (r.status === 'fulfilled' && r.value !== null) {
+          results.push(solTxToRawTransactionEvent(r.value, batch[j]));
+        } else {
+          results.push(null);
+        }
+      }
+
+      if (i + TX_FETCH_BATCH < signatures.length) {
+        await new Promise(r => setTimeout(r, TX_FETCH_DELAY_MS));
+      }
+    }
+
+    return results;
   }
 
   async getAddressHistory(
-    _address: string,
-    _opts?: { limit?: number; before?: string; type?: string },
+    address: string,
+    opts?: { limit?: number; before?: string; type?: string },
   ): Promise<AddressHistory[]> {
-    // Future: Agave RPC `getSignaturesForAddress` → `getTransaction` per sig.
-    // Results archived to raw_transactions; ingest_jobs tracks replay ranges.
-    throw new ProviderError(
-      'sovereign_solana', 'NOT_OPERATIONAL',
-      'getAddressHistory: Agave RPC not yet wired — set SOVEREIGN_RPC_URL',
-    );
+    const client = requireRpcClient('getAddressHistory');
+
+    // Step 1: fetch signature list (1 RPC call)
+    const sigInfos = await client.getSignaturesForAddress(address, {
+      limit:  opts?.limit ?? 100,
+      before: opts?.before,
+    });
+
+    if (sigInfos.length === 0) return [];
+
+    // Only process confirmed/finalized signatures — skip failed txns
+    const confirmed = sigInfos.filter(s => s.err === null);
+
+    // Step 2: fetch full transactions in concurrent batches.
+    // Promise.allSettled so one failed fetch does not abort the batch.
+    // When a fetch fails, solTxToAddressHistory falls back to sigInfo
+    // as the `raw` payload — still archivable.
+    const results: AddressHistory[] = [];
+
+    for (let i = 0; i < confirmed.length; i += TX_FETCH_BATCH) {
+      const batch = confirmed.slice(i, i + TX_FETCH_BATCH);
+
+      const settled = await Promise.allSettled(
+        batch.map(s => client.getTransaction(s.signature)),
+      );
+
+      for (let j = 0; j < batch.length; j++) {
+        const sigInfo  = batch[j];
+        const r        = settled[j];
+        const tx       = r.status === 'fulfilled' ? r.value : null;
+        results.push(solTxToAddressHistory(sigInfo, tx));
+      }
+
+      if (i + TX_FETCH_BATCH < confirmed.length) {
+        await new Promise(r => setTimeout(r, TX_FETCH_DELAY_MS));
+      }
+    }
+
+    return results;
   }
 
   // ── WalletIntelProvider ─────────────────────────────────────
 
-  async getWalletBalances(_address: string): Promise<WalletBalances> {
-    // Future: Agave RPC `getMultipleAccounts` (SOL lamports) +
-    // `getTokenAccountsByOwner` (SPL balances, including USDC).
-    // No external API credits consumed — fully sovereign.
-    throw new ProviderError(
-      'sovereign_solana', 'NOT_OPERATIONAL',
-      'getWalletBalances: Agave RPC not yet wired — set SOVEREIGN_RPC_URL',
-    );
+  async getWalletBalances(address: string): Promise<WalletBalances> {
+    const client = requireRpcClient('getWalletBalances');
+
+    // Fetch native SOL account info + USDC token accounts in parallel
+    const [accountInfo, tokenAccounts] = await Promise.all([
+      client.getAccountInfo(address),
+      client.getTokenAccountsByOwner(address, USDC_MINT),
+    ]);
+
+    const sol_balance = accountInfo ? accountInfo.lamports / 1e9 : 0;
+
+    // Sum all USDC token accounts owned by this address (usually 1)
+    let usdc_balance = 0;
+    for (const ta of tokenAccounts) {
+      const uiAmount = ta.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
+      if (typeof uiAmount === 'number') usdc_balance += uiAmount;
+    }
+
+    const solPriceUsd    = await resolveSolPriceUsd();
+    const total_value_usd = sol_balance * solPriceUsd + usdc_balance;
+
+    return {
+      address,
+      sol_balance,
+      usdc_balance,
+      total_value_usd,
+      token_count:  tokenAccounts.length,
+      refreshed_at: new Date(),
+    };
   }
 
   async getWalletProfile(address: string): Promise<WalletProfile | null> {
     // Owned entirely by SONAR's internal entity graph layer.
     // Pure DB read: entity_addresses → entities. No external provider call.
-    // Returns null for unknown addresses — callers must handle null explicitly.
     const entity = await resolveAddress(address, createAdminClient());
     if (!entity) return null;
     return toWalletProfile(address, entity);
@@ -128,46 +236,29 @@ export class SovereignSolanaProvider implements HistoricalProvider, WalletIntelP
   async discoverWhales(
     _opts?: { min_value_usd?: number; limit?: number },
   ): Promise<DiscoveredWallet[]> {
-    // Future: owned entirely by SONAR's internal intelligence layer.
-    // Query raw_account_updates ranked by lamports (no external API call).
-    // Cross-reference with entity_addresses + wallet_clusters for labeling.
-    // This is a core intelligence moat feature — no external provider involved.
+    // Future: owned by SONAR's internal intelligence layer.
+    // Query raw_account_updates ranked by lamports; cross-reference
+    // entity_addresses + wallet_clusters for labeling.
+    // No external provider involved — pure sovereign intelligence moat.
     throw new ProviderError(
       'sovereign_solana', 'NOT_OPERATIONAL',
-      'discoverWhales: internal intelligence layer not yet wired — implement raw_account_updates ranking',
+      'discoverWhales: raw_account_updates ranking layer not yet built',
     );
   }
 }
 
 // ── SovereignChainStreamProvider ─────────────────────────────
 // Pull-stream adapter for Yellowstone/Geyser gRPC.
-// This is the correct and intended implementation of the
-// ChainStreamProvider pull-stream contract.
-//
-// Future wiring per method:
-//   subscribeTransactions → Geyser SubscribeRequest.transactions filter;
-//     events archive to raw_transactions (source='geyser').
-//   subscribeAccounts     → Geyser SubscribeRequest.accounts filter;
-//     events archive to raw_account_updates (source='geyser').
-//   subscribeSlots        → Geyser SubscribeRequest.slots;
-//     events archive to raw_blocks (source='geyser').
-//   close()               → graceful gRPC channel shutdown.
-//
-// Active subscriptions should record subscription IDs in ingest_jobs
-// for observability and restart recovery.
+// Remains NOT_OPERATIONAL until Yellowstone endpoint is wired.
 
 export class SovereignChainStreamProvider implements ChainStreamProvider {
   readonly name = 'sovereign_geyser';
 
   async close(): Promise<void> {
     // Future: close the Yellowstone gRPC channel gracefully.
-    // No-op until the channel is established.
   }
 
   subscribeTransactions(_opts: SubscribeTransactionsOptions): AsyncIterable<RawTransactionEvent> {
-    // Future: Yellowstone gRPC SubscribeRequest.transactions
-    // filtered by _opts.addresses + _opts.transaction_types.
-    // Yields RawTransactionEvent; raw payload archived to raw_transactions.
     return notOperationalStream<RawTransactionEvent>(
       'subscribeTransactions',
       'Yellowstone/Geyser gRPC not yet wired — set YELLOWSTONE_ENDPOINT',
@@ -175,9 +266,6 @@ export class SovereignChainStreamProvider implements ChainStreamProvider {
   }
 
   subscribeAccounts(_opts: SubscribeAccountsOptions): AsyncIterable<RawAccountEvent> {
-    // Future: Yellowstone gRPC SubscribeRequest.accounts
-    // filtered by _opts.addresses and commitment level.
-    // Yields RawAccountEvent; raw payload archived to raw_account_updates.
     return notOperationalStream<RawAccountEvent>(
       'subscribeAccounts',
       'Yellowstone/Geyser gRPC not yet wired — set YELLOWSTONE_ENDPOINT',
@@ -185,8 +273,6 @@ export class SovereignChainStreamProvider implements ChainStreamProvider {
   }
 
   subscribeSlots(_opts: SubscribeSlotsOptions): AsyncIterable<RawSlotEvent> {
-    // Future: Yellowstone gRPC SubscribeRequest.slots.
-    // Yields RawSlotEvent; slot metadata archived to raw_blocks.
     return notOperationalStream<RawSlotEvent>(
       'subscribeSlots',
       'Yellowstone/Geyser gRPC not yet wired — set YELLOWSTONE_ENDPOINT',

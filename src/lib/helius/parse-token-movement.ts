@@ -35,8 +35,10 @@ export interface ParsedTokenMovement {
   signature:       string;
   block_time:      string;
   token_mint:      string;
-  token_symbol:    null;          // enriched later
-  token_name:      null;          // enriched later
+  /** null when not yet enriched; populated by sovereign decoder via registry. */
+  token_symbol:    string | null;
+  /** null when not yet enriched; populated by sovereign decoder via registry. */
+  token_name:      string | null;
   action:          TokenMovementAction;
   amount_token:    number | null;
   amount_sol:      number | null;
@@ -44,7 +46,8 @@ export interface ParsedTokenMovement {
   price_per_token: number | null;
   protocol:        string | null;
   pool_address:    null;          // enriched later
-  is_new_token:    false;
+  /** true when mint absent from registry (first sighting). Helius path always false. */
+  is_new_token:    boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────

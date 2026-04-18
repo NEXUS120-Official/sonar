@@ -278,6 +278,32 @@ export interface TokenMetadataRow {
   updated_at:  string;
 }
 
+export interface SovereignMintEnrichmentRow {
+  id:                        string;
+  mint:                      string;
+  token_program:             string;   // 'spl_token' | 'token_2022' | 'unknown'
+  decimals:                  number | null;
+  mint_authority:            string | null;
+  freeze_authority:          string | null;
+  has_transfer_fee:          boolean;
+  transfer_fee_bps:          number | null;
+  has_confidential_transfer: boolean;
+  has_auditor_key:           boolean;
+  auditor_elgamal_pubkey:    string | null;
+  has_transfer_hook:         boolean;
+  transfer_hook_program:     string | null;
+  has_permanent_delegate:    boolean;
+  has_native_metadata:       boolean;
+  risk_flags:                string[];
+  confidence:                string;   // 'high' | 'medium' | 'low'
+  needs_followup:            boolean;
+  enrichment_source:         string | null;
+  methodology_version:       string | null;
+  inspected_at:              string;
+  created_at:                string;
+  updated_at:                string;
+}
+
 export interface GmgnSmartMoneyCacheRow {
   id: string;
   wallet_address: string;
@@ -354,6 +380,11 @@ export interface Database {
         Row: TokenMetadataRow;
         Insert: Omit<TokenMetadataRow, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string };
         Update: Partial<Omit<TokenMetadataRow, 'id'>>;
+      };
+      sovereign_mint_enrichments: {
+        Row: SovereignMintEnrichmentRow;
+        Insert: Omit<SovereignMintEnrichmentRow, 'id' | 'created_at'> & { id?: string; created_at?: string };
+        Update: Partial<Omit<SovereignMintEnrichmentRow, 'id'>>;
       };
       gmgn_smart_money_cache: {
         Row: GmgnSmartMoneyCacheRow;
