@@ -87,6 +87,35 @@ export type JoinerShadowMap = ReadonlyMap<string, JoinerShadowLink[]>;
 /** Empty shadow map — use as default until Block 23. */
 export const EMPTY_SHADOW_MAP: JoinerShadowMap = new Map();
 
+/**
+ * Shadow family entry — produced by Multi-Hop Shadow Continuity (Block 25).
+ * A wallet is a member of a family when it appears in shadow_families.member_wallets.
+ * Injected via familyMap parameter into joinSovereignFlow().
+ */
+export interface JoinerShadowFamilyEntry {
+  family_id:                string;
+  root_wallet:              string;
+  source_exchange:          string | null;
+  source_exchange_wallet:   string | null;
+  total_members:            number;
+  hop_depth:                number;
+  confidence:               number;
+  confidence_tier:          ConfidenceTier;
+  patterns:                 string[];
+  continuity_reasons:       string[];
+  has_privacy_activation:   boolean;
+  has_token2022_activity:   boolean;
+  has_gas_funding:          boolean;
+  has_fan_out:              boolean;
+  has_fan_in:               boolean;
+  has_temporal_correlation: boolean;
+}
+/** address → shadow family that contains this wallet as a member */
+export type JoinerShadowFamilyMap = ReadonlyMap<string, JoinerShadowFamilyEntry>;
+
+/** Empty family map — use as default until Block 26. */
+export const EMPTY_SHADOW_FAMILY_MAP: JoinerShadowFamilyMap = new Map();
+
 // ── Output component types ────────────────────────────────────
 
 export interface TokenContextResult {
@@ -147,6 +176,31 @@ export interface ShadowLineageContext {
   lineage_evidence:            string[];
 }
 
+/**
+ * Multi-hop shadow family context (Block 26).
+ * Populated when the signal's from/to/whale address is a member of
+ * a detected shadow family in shadow_families table.
+ * family_id === null means no family context — graceful degradation.
+ */
+export interface ShadowFamilyContext {
+  family_id:                string | null;
+  root_wallet:              string | null;
+  source_exchange:          string | null;
+  source_exchange_wallet:   string | null;
+  total_members:            number | null;
+  hop_depth:                number | null;
+  confidence:               number | null;
+  confidence_tier:          ConfidenceTier | null;
+  patterns:                 string[];
+  continuity_reasons:       string[];
+  has_privacy_activation:   boolean;
+  has_token2022_activity:   boolean;
+  has_gas_funding:          boolean;
+  has_fan_out:              boolean;
+  has_fan_in:               boolean;
+  has_temporal_correlation: boolean;
+}
+
 // Slices of raw decoded data — carried for replay without full row re-fetch.
 type MovementSlice = Pick<
   Omit<MovementRow, 'id' | 'processed_at' | 'created_at'>,
@@ -187,8 +241,12 @@ export interface EnrichedSovereignSignal {
   // ── Cluster context
   cluster_context:     ClusterAttribution   | null;
 
-  // ── Shadow / CEX-origin lineage (scaffolded, populated by Block 23)
-  shadow_context:      ShadowLineageContext;
+  // ── Shadow / CEX-origin lineage (Block 23)
+  shadow_context:        ShadowLineageContext;
+
+  // ── Shadow family / multi-hop lineage (Block 26)
+  // null family_id = no family membership detected — always present, never missing
+  shadow_family_context: ShadowFamilyContext;
 
   // ── Signal confidence (Source of Truth §16)
   signal_confidence:   ConfidenceTier;
@@ -448,12 +506,60 @@ function buildShadowContext(
   return empty;
 }
 
+// ── Pure helper: shadow family context ───────────────────────
+
+const EMPTY_SHADOW_FAMILY_CONTEXT: ShadowFamilyContext = {
+  family_id: null, root_wallet: null, source_exchange: null,
+  source_exchange_wallet: null, total_members: null, hop_depth: null,
+  confidence: null, confidence_tier: null, patterns: [],
+  continuity_reasons: [], has_privacy_activation: false,
+  has_token2022_activity: false, has_gas_funding: false,
+  has_fan_out: false, has_fan_in: false, has_temporal_correlation: false,
+};
+
+function buildShadowFamilyContext(
+  fromAddr:  string | null,
+  toAddr:    string | null,
+  whaleAddr: string | null,
+  familyMap: JoinerShadowFamilyMap,
+): ShadowFamilyContext {
+  // Try each address — return the highest-confidence family found
+  const candidates: JoinerShadowFamilyEntry[] = [];
+  for (const addr of [fromAddr, toAddr, whaleAddr]) {
+    if (!addr) continue;
+    const entry = familyMap.get(addr);
+    if (entry) candidates.push(entry);
+  }
+  if (candidates.length === 0) return EMPTY_SHADOW_FAMILY_CONTEXT;
+
+  const best = candidates.reduce((a, b) => a.confidence >= b.confidence ? a : b);
+  return {
+    family_id:                best.family_id,
+    root_wallet:              best.root_wallet,
+    source_exchange:          best.source_exchange,
+    source_exchange_wallet:   best.source_exchange_wallet,
+    total_members:            best.total_members,
+    hop_depth:                best.hop_depth,
+    confidence:               best.confidence,
+    confidence_tier:          best.confidence_tier,
+    patterns:                 best.patterns,
+    continuity_reasons:       best.continuity_reasons,
+    has_privacy_activation:   best.has_privacy_activation,
+    has_token2022_activity:   best.has_token2022_activity,
+    has_gas_funding:          best.has_gas_funding,
+    has_fan_out:              best.has_fan_out,
+    has_fan_in:               best.has_fan_in,
+    has_temporal_correlation: best.has_temporal_correlation,
+  };
+}
+
 // ── Pure helper: signal scoring ───────────────────────────────
 
 function computeSignalScore(
   entityAttribs:  EntityAttribution[],
   tokenSecurity:  TokenSecurityPosture,
   shadowContext:  ShadowLineageContext,
+  familyContext:  ShadowFamilyContext,
 ): number {
   // Entity component: max 40 pts
   const bestEntityConf = Math.max(...entityAttribs.map(e => e.confidence), 0);
@@ -479,7 +585,13 @@ function computeSignalScore(
     (shadowContext.exchange_origin_confidence ?? 0) >= 70 ? 30 :
     (shadowContext.exchange_origin_confidence ?? 0) >= 40 ? 20 : 10;
 
-  return Math.min(100, entityScore + tokenScore + fogScore + shadowScore);
+  // Shadow family / multi-hop lineage component: max 15 pts
+  // Additive — family context adds depth beyond the first-hop shadow link.
+  const familyScore = !familyContext.family_id ? 0 :
+    (familyContext.confidence ?? 0) >= 55 ? 15 :
+    (familyContext.confidence ?? 0) >= 35 ? 10 : 5;
+
+  return Math.min(100, entityScore + tokenScore + fogScore + shadowScore + familyScore);
 }
 
 function scoreToTier(score: number): ConfidenceTier {
@@ -499,6 +611,7 @@ function buildEvidence(
   tokenCtx:      TokenContextResult | null,
   tokenSecurity: TokenSecurityPosture,
   shadowContext: ShadowLineageContext,
+  familyContext: ShadowFamilyContext,
 ): string[] {
   const ev: string[] = [];
 
@@ -524,6 +637,23 @@ function buildEvidence(
     ev.push(`exchange-origin shadow link: ${shadowContext.source_exchange} (conf=${shadowContext.exchange_origin_confidence})`);
     if (shadowContext.privacy_activation) {
       ev.push('wallet activated Token-2022 privacy after exchange funding');
+    }
+  }
+
+  if (familyContext.family_id) {
+    ev.push(
+      `shadow family member: ${familyContext.total_members}-wallet family ` +
+      `(${familyContext.source_exchange ?? 'unknown exchange'}, ` +
+      `family conf=${familyContext.confidence}, tier=${familyContext.confidence_tier})`,
+    );
+    if (familyContext.has_gas_funding) {
+      ev.push('gas-funding chain detected: root wallet funded child wallets with small SOL topups');
+    }
+    if (familyContext.has_fan_out) {
+      ev.push(`fan-out: family root funds multiple child wallets (coordinated management signal)`);
+    }
+    if (familyContext.has_temporal_correlation) {
+      ev.push('temporal correlation: sibling transfers within tight time window (machine-like timing)');
     }
   }
 
@@ -568,7 +698,8 @@ export function joinSovereignFlow(
   registry:    SovereignTokenRegistry,
   entityMap:   JoinerEntityMap,
   clusterMap:  JoinerClusterMap,
-  shadowMap:   JoinerShadowMap = EMPTY_SHADOW_MAP,
+  shadowMap:   JoinerShadowMap        = EMPTY_SHADOW_MAP,
+  familyMap:   JoinerShadowFamilyMap  = EMPTY_SHADOW_FAMILY_MAP,
 ): EnrichedSovereignSignal {
   const enriched_at = new Date().toISOString();
 
@@ -596,16 +727,20 @@ export function joinSovereignFlow(
   // ── Shadow lineage ────────────────────────────────────────────
   const shadowContext = buildShadowContext(fromAddr, toAddr, whaleAddr, shadowMap);
 
+  // ── Shadow family / multi-hop lineage (Block 26) ──────────────
+  const shadowFamilyContext = buildShadowFamilyContext(fromAddr, toAddr, whaleAddr, familyMap);
+
   // ── Signal scoring ────────────────────────────────────────────
   const score = computeSignalScore(
     [fromEntity, toEntity, whaleEntity],
     tokenSecurity,
     shadowContext,
+    shadowFamilyContext,
   );
   const signal_confidence = scoreToTier(score);
 
   // ── Evidence + attribution ────────────────────────────────────
-  const evidence           = buildEvidence(fromEntity, toEntity, whaleEntity, tokenContext, tokenSecurity, shadowContext);
+  const evidence           = buildEvidence(fromEntity, toEntity, whaleEntity, tokenContext, tokenSecurity, shadowContext, shadowFamilyContext);
   const attribution_reason = buildAttributionReason(fromEntity, toEntity, whaleEntity, tokenContext, tokenSecurity);
 
   // ── Raw slices ────────────────────────────────────────────────
@@ -649,8 +784,9 @@ export function joinSovereignFlow(
     from_entity:         fromEntity,
     to_entity:           toEntity,
     whale_entity:        whaleEntity,
-    cluster_context:     clusterContext,
-    shadow_context:      shadowContext,
+    cluster_context:       clusterContext,
+    shadow_context:        shadowContext,
+    shadow_family_context: shadowFamilyContext,
     signal_confidence,
     signal_score:        score,
     evidence,
@@ -747,4 +883,90 @@ export async function loadJoinerContext(
   ]);
 
   return { entityMap, clusterMap };
+}
+
+/**
+ * Load shadow family context for a set of addresses.
+ * Returns a JoinerShadowFamilyMap (address → family entry).
+ *
+ * Uses the GIN-indexed member_wallets array overlap query for efficiency.
+ * Addresses with no family membership are absent from the map.
+ * Only returns families at or above minConfidence (default: 20 = moderate_evidence).
+ */
+export async function loadJoinerShadowFamilyMap(
+  addresses:     string[],
+  db:            Db,
+  minConfidence: number = 20,
+): Promise<JoinerShadowFamilyMap> {
+  const valid = addresses.filter(a => typeof a === 'string' && a.length > 0);
+  if (valid.length === 0) return new Map();
+
+  // PostgREST array overlap: member_wallets && ARRAY[...addresses]
+  const arrLiteral = `{${valid.join(',')}}`;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from('shadow_families')
+    .select(
+      'family_id, root_wallet, source_exchange, source_exchange_wallet, ' +
+      'total_members, hop_depth, confidence, confidence_tier, ' +
+      'patterns, continuity_reasons, ' +
+      'has_privacy_activation, has_token2022_activity, has_gas_funding, ' +
+      'has_fan_out, has_fan_in, has_temporal_correlation, member_wallets',
+    )
+    .gte('confidence', minConfidence)
+    .filter('member_wallets', 'ov', arrLiteral);
+
+  const result = new Map<string, JoinerShadowFamilyEntry>();
+  const validSet = new Set(valid);
+
+  for (const row of (data ?? []) as Array<{
+    family_id:                string;
+    root_wallet:              string;
+    source_exchange:          string | null;
+    source_exchange_wallet:   string | null;
+    total_members:            number;
+    hop_depth:                number;
+    confidence:               number;
+    confidence_tier:          string;
+    patterns:                 string[];
+    continuity_reasons:       string[];
+    has_privacy_activation:   boolean;
+    has_token2022_activity:   boolean;
+    has_gas_funding:          boolean;
+    has_fan_out:              boolean;
+    has_fan_in:               boolean;
+    has_temporal_correlation: boolean;
+    member_wallets:           string[];
+  }>) {
+    const entry: JoinerShadowFamilyEntry = {
+      family_id:                row.family_id,
+      root_wallet:              row.root_wallet,
+      source_exchange:          row.source_exchange,
+      source_exchange_wallet:   row.source_exchange_wallet,
+      total_members:            row.total_members,
+      hop_depth:                row.hop_depth,
+      confidence:               row.confidence,
+      confidence_tier:          row.confidence_tier as ConfidenceTier,
+      patterns:                 row.patterns,
+      continuity_reasons:       row.continuity_reasons,
+      has_privacy_activation:   row.has_privacy_activation,
+      has_token2022_activity:   row.has_token2022_activity,
+      has_gas_funding:          row.has_gas_funding,
+      has_fan_out:              row.has_fan_out,
+      has_fan_in:               row.has_fan_in,
+      has_temporal_correlation: row.has_temporal_correlation,
+    };
+
+    // Map each member wallet that matches our request set
+    for (const member of row.member_wallets) {
+      if (!validSet.has(member)) continue;
+      const existing = result.get(member);
+      if (!existing || entry.confidence > existing.confidence) {
+        result.set(member, entry);
+      }
+    }
+  }
+
+  return result;
 }

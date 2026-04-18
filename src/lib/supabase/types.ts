@@ -40,7 +40,10 @@ export type AlertType =
   | 'exchange_shadow_birth'       // exchange-funded wallet activates privacy
   | 'privacy_token_activity'      // Token-2022 confidential transfer activity
   | 'cluster_synchronized_flow'   // cluster-member coordinated positioning
-  | 'sovereign_high_confidence';  // joiner direct_proof / strong_evidence
+  | 'sovereign_high_confidence'   // joiner direct_proof / strong_evidence
+  // ── Shadow family archetypes (Block 26) ──────────────────────
+  | 'shadow_family_fan_out'       // family root funded ≥3 child wallets
+  | 'shadow_gas_funding_chain';   // gas-funding lineage chain detected
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 
@@ -356,6 +359,23 @@ export interface SovereignSignalRow {
   shadow_source_exchange: string | null;
   shadow_confidence:      number | null;
   shadow_linkage_reason:  string | null;
+  // ── Shadow family / multi-hop lineage (Block 26) ──────────────
+  shadow_family_id:                     string | null;
+  shadow_family_root_wallet:            string | null;
+  shadow_family_source_exchange:        string | null;
+  shadow_family_source_exchange_wallet: string | null;
+  shadow_family_total_members:          number | null;
+  shadow_family_hop_depth:              number | null;
+  shadow_family_confidence:             number | null;
+  shadow_family_confidence_tier:        string | null;
+  shadow_family_patterns:               string[];
+  shadow_family_continuity_reasons:     string[];
+  shadow_family_has_privacy_activation: boolean;
+  shadow_family_has_token2022_activity: boolean;
+  shadow_family_has_gas_funding:        boolean;
+  shadow_family_has_fan_out:            boolean;
+  shadow_family_has_fan_in:             boolean;
+  shadow_family_has_temporal_correlation: boolean;
   signal_score:           number;
   signal_confidence:      string;
   evidence:               string[];

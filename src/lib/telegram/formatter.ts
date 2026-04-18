@@ -58,6 +58,9 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   privacy_token_activity:    '🔒 Privacy Token Activity',
   cluster_synchronized_flow: '🔄 Cluster Synchronized Flow',
   sovereign_high_confidence: '🛡️ Sovereign Signal',
+  // ── Shadow family archetypes (Block 26) ──────────────────────
+  shadow_family_fan_out:     '🕸️ Shadow Family Fan-Out',
+  shadow_gas_funding_chain:  '⛽ Shadow Gas-Funding Chain',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────

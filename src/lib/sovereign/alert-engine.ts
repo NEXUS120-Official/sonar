@@ -41,7 +41,9 @@ export type AlertArchetype =
   | 'exchange_shadow_birth'       // exchange-funded → privacy activation birth event
   | 'privacy_token_activity'      // confidential transfer / Token-2022 fog activity
   | 'cluster_synchronized_flow'   // cluster members acting in coordination
-  | 'sovereign_high_confidence';  // joiner-scored direct_proof or strong_evidence
+  | 'sovereign_high_confidence'   // joiner-scored direct_proof or strong_evidence
+  | 'shadow_family_fan_out'       // family root funded ≥3 child wallets (Block 26)
+  | 'shadow_gas_funding_chain';   // gas-funding lineage chain detected (Block 26)
 
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -108,6 +110,10 @@ function walletShort(addr: string | null): string {
 
 // ── Intelligence scoring ──────────────────────────────────────
 
+const FAMILY_BONUS_HIGH = 15;  // family confidence >= 55
+const FAMILY_BONUS_MED  = 10;  // family confidence >= 35
+const FAMILY_BONUS_LOW  =  5;  // any family membership
+
 function scoreSignal(sig: PersistableSovereignSignal): number {
   let score = sig.signal_score;
 
@@ -123,6 +129,14 @@ function scoreSignal(sig: PersistableSovereignSignal): number {
   const usd = sig.amount_usd ?? 0;
   if (usd >= 1_000_000)    score += VOLUME_BONUS_LG;
   else if (usd >= 100_000) score += VOLUME_BONUS_SM;
+
+  // Family lineage bonus — caps inside min(100, ...) below
+  if (sig.shadow_family_id !== null) {
+    const fc = sig.shadow_family_confidence ?? 0;
+    if (fc >= 55)      score += FAMILY_BONUS_HIGH;
+    else if (fc >= 35) score += FAMILY_BONUS_MED;
+    else               score += FAMILY_BONUS_LOW;
+  }
 
   return Math.min(100, score);
 }
@@ -156,6 +170,16 @@ function classifyArchetype(
     return 'cluster_synchronized_flow';
   }
 
+  // shadow_family_fan_out: family with ≥3 children (Block 26)
+  if (sig.shadow_family_id !== null && sig.shadow_family_has_fan_out) {
+    return 'shadow_family_fan_out';
+  }
+
+  // shadow_gas_funding_chain: family with gas-funding lineage (Block 26)
+  if (sig.shadow_family_id !== null && sig.shadow_family_has_gas_funding) {
+    return 'shadow_gas_funding_chain';
+  }
+
   // sovereign_high_confidence: joiner-scored top tiers
   if (sig.signal_confidence === 'direct_proof' || sig.signal_confidence === 'strong_evidence') {
     return 'sovereign_high_confidence';
@@ -184,6 +208,9 @@ function toConsolidationKey(archetype: AlertArchetype, sig: PersistableSovereign
       return `${archetype}::${sig.token_mint ?? 'unknown'}`;
     case 'cluster_synchronized_flow':
       return `${archetype}::${sig.cluster_type ?? 'unknown'}`;
+    case 'shadow_family_fan_out':
+    case 'shadow_gas_funding_chain':
+      return `${archetype}::${sig.shadow_family_id ?? 'unknown'}`;
     case 'sovereign_high_confidence':
       return `${archetype}::${sig.signal_confidence}`;
   }
@@ -249,6 +276,30 @@ function buildAlertContent(
           `${from} → ${to}. ` +
           `Sovereign confidence: ${sig.signal_confidence}.`,
       };
+
+    case 'shadow_family_fan_out': {
+      const members  = sig.shadow_family_total_members ?? '?';
+      const familyEx = sig.shadow_family_source_exchange ?? exch;
+      return {
+        title: `Shadow Family Fan-Out — ${members} Members via ${familyEx}`,
+        body:
+          `Wallet belongs to a ${familyEx}-anchored shadow family with ${members} members ` +
+          `(fan-out pattern). Family confidence: ${sig.shadow_family_confidence ?? 0}. ` +
+          `${amtStr} flow ${from} → ${to}. Evidence: ${ev3}.`,
+      };
+    }
+
+    case 'shadow_gas_funding_chain': {
+      const familyEx2 = sig.shadow_family_source_exchange ?? exch;
+      const depth     = sig.shadow_family_hop_depth ?? 1;
+      return {
+        title: `Shadow Gas-Funding Chain — ${familyEx2} Origin`,
+        body:
+          `Gas-funding lineage detected: ${familyEx2}-anchored root wallet funded this ` +
+          `wallet (hop depth: ${depth}). Family confidence: ${sig.shadow_family_confidence ?? 0}. ` +
+          `${amtStr} flow ${from} → ${to}. Evidence: ${ev3}.`,
+      };
+    }
 
     case 'sovereign_high_confidence':
     default:
@@ -373,6 +424,8 @@ export function decisionToAlertInsert(decision: SovereignAlertDecision): AlertIn
     privacy_token_activity:    'privacy_token_activity',
     cluster_synchronized_flow: 'cluster_synchronized_flow',
     sovereign_high_confidence: 'sovereign_high_confidence',
+    shadow_family_fan_out:     'shadow_family_fan_out',
+    shadow_gas_funding_chain:  'shadow_gas_funding_chain',
   };
 
   return {

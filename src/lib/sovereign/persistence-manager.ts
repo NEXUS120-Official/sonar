@@ -92,11 +92,30 @@ export interface PersistableSovereignSignal {
   cluster_type:         string | null;
   cluster_name:         string | null;
 
-  // ── Shadow / CEX-origin lineage (Block 23 will populate)
+  // ── Shadow / CEX-origin lineage (Block 23)
   has_shadow_link:        boolean;
   shadow_source_exchange: string | null;
   shadow_confidence:      number | null;
   shadow_linkage_reason:  string | null;
+
+  // ── Shadow family / multi-hop lineage (Block 26)
+  // All null when no family membership detected — graceful degradation.
+  shadow_family_id:                     string | null;
+  shadow_family_root_wallet:            string | null;
+  shadow_family_source_exchange:        string | null;
+  shadow_family_source_exchange_wallet: string | null;
+  shadow_family_total_members:          number | null;
+  shadow_family_hop_depth:              number | null;
+  shadow_family_confidence:             number | null;
+  shadow_family_confidence_tier:        string | null;
+  shadow_family_patterns:               string[];
+  shadow_family_continuity_reasons:     string[];
+  shadow_family_has_privacy_activation: boolean;
+  shadow_family_has_token2022_activity: boolean;
+  shadow_family_has_gas_funding:        boolean;
+  shadow_family_has_fan_out:            boolean;
+  shadow_family_has_fan_in:             boolean;
+  shadow_family_has_temporal_correlation: boolean;
 
   // ── Signal quality (Source of Truth §16)
   signal_score:        number;
@@ -202,6 +221,23 @@ export function convertSignalToPayload(
     shadow_source_exchange: signal.shadow_context.source_exchange,
     shadow_confidence:      signal.shadow_context.exchange_origin_confidence,
     shadow_linkage_reason:  signal.shadow_context.linkage_reason,
+
+    shadow_family_id:                     signal.shadow_family_context.family_id,
+    shadow_family_root_wallet:            signal.shadow_family_context.root_wallet,
+    shadow_family_source_exchange:        signal.shadow_family_context.source_exchange,
+    shadow_family_source_exchange_wallet: signal.shadow_family_context.source_exchange_wallet,
+    shadow_family_total_members:          signal.shadow_family_context.total_members,
+    shadow_family_hop_depth:              signal.shadow_family_context.hop_depth,
+    shadow_family_confidence:             signal.shadow_family_context.confidence,
+    shadow_family_confidence_tier:        signal.shadow_family_context.confidence_tier,
+    shadow_family_patterns:               signal.shadow_family_context.patterns,
+    shadow_family_continuity_reasons:     signal.shadow_family_context.continuity_reasons,
+    shadow_family_has_privacy_activation: signal.shadow_family_context.has_privacy_activation,
+    shadow_family_has_token2022_activity: signal.shadow_family_context.has_token2022_activity,
+    shadow_family_has_gas_funding:        signal.shadow_family_context.has_gas_funding,
+    shadow_family_has_fan_out:            signal.shadow_family_context.has_fan_out,
+    shadow_family_has_fan_in:             signal.shadow_family_context.has_fan_in,
+    shadow_family_has_temporal_correlation: signal.shadow_family_context.has_temporal_correlation,
 
     signal_score:       signal.signal_score,
     signal_confidence:  signal.signal_confidence,
@@ -451,9 +487,11 @@ import {
   loadJoinerEntityMap,
   loadJoinerClusterMap,
   EMPTY_SHADOW_MAP,
+  EMPTY_SHADOW_FAMILY_MAP,
   type JoinerEntityMap,
   type JoinerClusterMap,
   type JoinerShadowMap,
+  type JoinerShadowFamilyMap,
 } from './flow-joiner';
 import { loadRegistryFromDb } from './token-registry';
 import type { NormalizedOutput } from '@/lib/normalizer';
@@ -480,6 +518,7 @@ export async function joinAndAcceptBatch(
   db:          Db,
   options: {
     shadowMap?:  JoinerShadowMap;
+    familyMap?:  JoinerShadowFamilyMap;
     flushAfter?: boolean;
   } = {},
 ): Promise<JoinAndAcceptResult> {
@@ -509,6 +548,7 @@ export async function joinAndAcceptBatch(
   }
 
   const shadowMap = options.shadowMap ?? EMPTY_SHADOW_MAP;
+  const familyMap = options.familyMap ?? EMPTY_SHADOW_FAMILY_MAP;
   let accepted = 0;
   let skipped  = 0;
 
@@ -518,7 +558,7 @@ export async function joinAndAcceptBatch(
       continue;
     }
     try {
-      const signal = joinSovereignFlow(n, registry, entityMap, clusterMap, shadowMap);
+      const signal = joinSovereignFlow(n, registry, entityMap, clusterMap, shadowMap, familyMap);
       manager.accept(signal);
       accepted++;
     } catch {

@@ -36,6 +36,7 @@ import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistor
 import { createBoundPersistenceManager }     from '@/lib/sovereign/persistence-manager';
 import { joinAndAcceptBatch }                from '@/lib/sovereign/persistence-manager';
 import { loadJoinerShadowMap }               from '@/lib/sovereign/shadow-linker';
+import { loadJoinerShadowFamilyMap }         from '@/lib/sovereign/flow-joiner';
 import {
   evaluateSignalsForAlerts,
   consolidateAlerts,
@@ -377,8 +378,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (r.to_address)   addrSet.add(r.to_address);
       }
 
-      // Load shadow map — falls back to empty map on error
-      let shadowMap = await loadJoinerShadowMap([...addrSet], db).catch(() => new Map());
+      // Load shadow map + shadow family map in parallel — both fall back on error
+      const [shadowMap, familyMap] = await Promise.all([
+        loadJoinerShadowMap([...addrSet], db).catch(() => new Map()),
+        loadJoinerShadowFamilyMap([...addrSet], db).catch(() => new Map()),
+      ]);
 
       // Bind persistence manager — flushes to sovereign_signals table
       const manager = createBoundPersistenceManager(db, { batchSizeThreshold: 200 });
@@ -386,6 +390,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Join + enqueue; do NOT flush yet (need peekBuffer for alert eval)
       const joinResult = await joinAndAcceptBatch(normalized, manager, db, {
         shadowMap,
+        familyMap,
         flushAfter: false,
       });
       log('info', `Sovereign join: ${joinResult.accepted} accepted, ${joinResult.skipped} skipped`);
@@ -401,6 +406,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'shadow_whale_inflow', 'exchange_shadow_birth',
           'privacy_token_activity', 'cluster_synchronized_flow',
           'sovereign_high_confidence',
+          'shadow_family_fan_out', 'shadow_gas_funding_chain',
         ];
         const sovereignCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
         const { data: recentSovereignRaw } = await db
