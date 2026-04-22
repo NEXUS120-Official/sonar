@@ -22,7 +22,7 @@
 // ============================================================
 
 import type { createAdminClient } from '@/lib/supabase/server';
-import type { RawTxPayload } from '@/lib/decoder';
+import { txToRawRow, type RawTxPayload } from '@/lib/decoder';
 import type { NormalizedOutput } from '@/lib/normalizer';
 import { envelopeFromHeliusPayload } from '@/lib/sovereign/ingest-envelope';
 import { normalizeIngestEnvelope } from '@/lib/sovereign/ingest-pipeline';
