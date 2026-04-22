@@ -117,6 +117,13 @@ export interface PersistableSovereignSignal {
   shadow_family_has_fan_in:             boolean;
   shadow_family_has_temporal_correlation: boolean;
 
+  // ── Deeper family semantics (Block 35)
+  family_member_role:          string;
+  family_coordination_posture: string;
+  family_structure_strength:   number;
+  family_pattern_count:        number;
+  family_reason_count:         number;
+
   // ── Token delta analysis (Block 28)
   // null = no token movement in this signal (SOL/USDC flow, or Helius path).
   // When present: classifies the on-chain delta pattern and flags asymmetry / fee behavior.
@@ -389,6 +396,12 @@ export function convertSignalToPayload(
     shadow_family_has_fan_out:            signal.shadow_family_context.has_fan_out,
     shadow_family_has_fan_in:             signal.shadow_family_context.has_fan_in,
     shadow_family_has_temporal_correlation: signal.shadow_family_context.has_temporal_correlation,
+
+    family_member_role:          signal.shadow_family_context.family_member_role,
+    family_coordination_posture: signal.shadow_family_context.family_coordination_posture,
+    family_structure_strength:   signal.shadow_family_context.family_structure_strength,
+    family_pattern_count:        signal.shadow_family_context.family_pattern_count,
+    family_reason_count:         signal.shadow_family_context.family_reason_count,
 
     privacy_lifecycle_stage:            privacyLifecycle.stage,
     privacy_lifecycle_confidence:       privacyLifecycle.confidence,

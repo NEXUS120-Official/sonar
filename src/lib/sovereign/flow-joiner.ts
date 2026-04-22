@@ -199,6 +199,13 @@ export interface ShadowFamilyContext {
   has_fan_out:              boolean;
   has_fan_in:               boolean;
   has_temporal_correlation: boolean;
+
+  // ── Deeper family semantics (Block 35)
+  family_member_role:         'root' | 'relay' | 'leaf' | 'hub' | 'isolated_member' | 'unknown';
+  family_coordination_posture:'fan_out_heavy' | 'gas_funded' | 'temporally_coordinated' | 'privacy_activated' | 'mixed_structure' | 'unknown';
+  family_structure_strength:  number;   // 0-100
+  family_pattern_count:       number;
+  family_reason_count:        number;
 }
 
 // Slices of raw decoded data — carried for replay without full row re-fetch.
@@ -598,7 +605,62 @@ const EMPTY_SHADOW_FAMILY_CONTEXT: ShadowFamilyContext = {
   continuity_reasons: [], has_privacy_activation: false,
   has_token2022_activity: false, has_gas_funding: false,
   has_fan_out: false, has_fan_in: false, has_temporal_correlation: false,
+  family_member_role: 'unknown',
+  family_coordination_posture: 'unknown',
+  family_structure_strength: 0,
+  family_pattern_count: 0,
+  family_reason_count: 0,
 };
+
+function inferFamilyMemberRole(
+  matchedAddr: string | null,
+  entry: JoinerShadowFamilyEntry,
+): ShadowFamilyContext['family_member_role'] {
+  if (!matchedAddr) return 'unknown';
+  if (matchedAddr === entry.root_wallet) return 'root';
+  if (entry.total_members <= 1) return 'isolated_member';
+  if (entry.has_fan_out && entry.hop_depth <= 1 && entry.total_members >= 5) return 'hub';
+  if (entry.hop_depth <= 1 && (entry.has_fan_out || entry.has_gas_funding)) return 'relay';
+  return 'leaf';
+}
+
+function inferFamilyCoordinationPosture(
+  entry: JoinerShadowFamilyEntry,
+): ShadowFamilyContext['family_coordination_posture'] {
+  const facets = [
+    entry.has_fan_out,
+    entry.has_gas_funding,
+    entry.has_temporal_correlation,
+    entry.has_privacy_activation || entry.has_token2022_activity,
+  ].filter(Boolean).length;
+
+  if (facets >= 3) return 'mixed_structure';
+  if (entry.has_fan_out && entry.total_members >= 4) return 'fan_out_heavy';
+  if (entry.has_temporal_correlation) return 'temporally_coordinated';
+  if (entry.has_privacy_activation || entry.has_token2022_activity) return 'privacy_activated';
+  if (entry.has_gas_funding) return 'gas_funded';
+  return 'unknown';
+}
+
+function computeFamilyStructureStrength(
+  entry: JoinerShadowFamilyEntry,
+): number {
+  const base = entry.confidence;
+  const patternBonus = Math.min(15, entry.patterns.length * 3);
+  const reasonBonus  = Math.min(15, entry.continuity_reasons.length * 2);
+  const memberBonus  =
+    entry.total_members >= 8 ? 15 :
+    entry.total_members >= 5 ? 10 :
+    entry.total_members >= 3 ? 5 : 0;
+
+  const behaviorBonus =
+    (entry.has_fan_out ? 8 : 0) +
+    (entry.has_gas_funding ? 6 : 0) +
+    (entry.has_temporal_correlation ? 6 : 0) +
+    ((entry.has_privacy_activation || entry.has_token2022_activity) ? 10 : 0);
+
+  return Math.min(100, base + patternBonus + reasonBonus + memberBonus + behaviorBonus);
+}
 
 function buildShadowFamilyContext(
   fromAddr:  string | null,
@@ -607,32 +669,41 @@ function buildShadowFamilyContext(
   familyMap: JoinerShadowFamilyMap,
 ): ShadowFamilyContext {
   // Try each address — return the highest-confidence family found
-  const candidates: JoinerShadowFamilyEntry[] = [];
+  const candidates: Array<{ addr: string; entry: JoinerShadowFamilyEntry }> = [];
   for (const addr of [fromAddr, toAddr, whaleAddr]) {
     if (!addr) continue;
     const entry = familyMap.get(addr);
-    if (entry) candidates.push(entry);
+    if (entry) candidates.push({ addr, entry });
   }
   if (candidates.length === 0) return EMPTY_SHADOW_FAMILY_CONTEXT;
 
-  const best = candidates.reduce((a, b) => a.confidence >= b.confidence ? a : b);
+  const best = candidates.reduce((a, b) => a.entry.confidence >= b.entry.confidence ? a : b);
+  const role = inferFamilyMemberRole(best.addr, best.entry);
+  const posture = inferFamilyCoordinationPosture(best.entry);
+  const strength = computeFamilyStructureStrength(best.entry);
+
   return {
-    family_id:                best.family_id,
-    root_wallet:              best.root_wallet,
-    source_exchange:          best.source_exchange,
-    source_exchange_wallet:   best.source_exchange_wallet,
-    total_members:            best.total_members,
-    hop_depth:                best.hop_depth,
-    confidence:               best.confidence,
-    confidence_tier:          best.confidence_tier,
-    patterns:                 best.patterns,
-    continuity_reasons:       best.continuity_reasons,
-    has_privacy_activation:   best.has_privacy_activation,
-    has_token2022_activity:   best.has_token2022_activity,
-    has_gas_funding:          best.has_gas_funding,
-    has_fan_out:              best.has_fan_out,
-    has_fan_in:               best.has_fan_in,
-    has_temporal_correlation: best.has_temporal_correlation,
+    family_id:                best.entry.family_id,
+    root_wallet:              best.entry.root_wallet,
+    source_exchange:          best.entry.source_exchange,
+    source_exchange_wallet:   best.entry.source_exchange_wallet,
+    total_members:            best.entry.total_members,
+    hop_depth:                best.entry.hop_depth,
+    confidence:               best.entry.confidence,
+    confidence_tier:          best.entry.confidence_tier,
+    patterns:                 best.entry.patterns,
+    continuity_reasons:       best.entry.continuity_reasons,
+    has_privacy_activation:   best.entry.has_privacy_activation,
+    has_token2022_activity:   best.entry.has_token2022_activity,
+    has_gas_funding:          best.entry.has_gas_funding,
+    has_fan_out:              best.entry.has_fan_out,
+    has_fan_in:               best.entry.has_fan_in,
+    has_temporal_correlation: best.entry.has_temporal_correlation,
+    family_member_role:       role,
+    family_coordination_posture: posture,
+    family_structure_strength: strength,
+    family_pattern_count:     best.entry.patterns.length,
+    family_reason_count:      best.entry.continuity_reasons.length,
   };
 }
 

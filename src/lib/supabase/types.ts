@@ -390,6 +390,12 @@ export interface SovereignSignalRow {
   shadow_family_has_fan_out:            boolean;
   shadow_family_has_fan_in:             boolean;
   shadow_family_has_temporal_correlation: boolean;
+  // ── Deeper family semantics (Block 35) ──────────────────────
+  family_member_role:          string;
+  family_coordination_posture: string;
+  family_structure_strength:   number;
+  family_pattern_count:        number;
+  family_reason_count:         number;
   // ── Privacy lifecycle persistence (Block 33) ────────────────
   privacy_lifecycle_stage:             string;        // none | bridgehead_birth | privacy_staging | privacy_active | public_reemergence | downstream_after_reemergence | family_privacy_reemergence
   privacy_lifecycle_confidence:        number;        // 0-100
