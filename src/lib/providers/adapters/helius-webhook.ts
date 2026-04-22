@@ -22,8 +22,10 @@
 // ============================================================
 
 import type { createAdminClient } from '@/lib/supabase/server';
-import { txToRawRow, type RawTxPayload } from '@/lib/decoder';
-import { normalizeRawTx, type NormalizedOutput } from '@/lib/normalizer';
+import type { RawTxPayload } from '@/lib/decoder';
+import type { NormalizedOutput } from '@/lib/normalizer';
+import { envelopeFromHeliusPayload } from '@/lib/sovereign/ingest-envelope';
+import { normalizeIngestEnvelope } from '@/lib/sovereign/ingest-pipeline';
 import { resolveTokenMetadataBatch } from '@/lib/helius/token-metadata';
 import { resolveAddressBatch } from '@/lib/entity-graph';
 import { sendMessage } from '@/lib/telegram/bot';
@@ -113,15 +115,16 @@ export class HeliusWebhookProcessor {
     // 1. Decode + normalize via the sovereign pipeline
     const normalized: NormalizedOutput[] = txns.map((tx) => {
       try {
-        return normalizeRawTx(txToRawRow(tx, 'helius_webhook'), ctx);
+        const envelope = envelopeFromHeliusPayload(tx);
+        return normalizeIngestEnvelope(envelope, ctx);
       } catch (err) {
         log('warn', `Normalize failed for tx ${(tx as any)?.signature ?? 'unknown'}`, err);
         return {
-          signature:        (tx as any)?.signature ?? '',
-          movement:         null,
-          tokenMovement:    null,
-          whaleAddressHint: null,
-          skipped:          true,
+          signature:          (tx as any)?.signature ?? '',
+          movement:           null,
+          tokenMovement:      null,
+          whaleAddressHint:   null,
+          skipped:            true,
           tokenDeltaAnalysis: null,
         };
       }

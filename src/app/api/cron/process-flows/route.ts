@@ -43,6 +43,7 @@ import {
   decisionToAlertInsert,
 }                                            from '@/lib/sovereign/alert-engine';
 import type { NormalizedOutput }             from '@/lib/normalizer';
+import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 
 // ── Logging ───────────────────────────────────────────────────
 
@@ -134,11 +135,26 @@ function movementRowToNormalizedOutput(row: MovementRow): NormalizedOutput {
       protocol:       row.protocol,
       block_time:     row.block_time,
     },
-    tokenMovement:    null,
-    whaleAddressHint: null,
-    skipped:          false,
+    tokenMovement:      null,
+    whaleAddressHint:   null,
+    skipped:            false,
     tokenDeltaAnalysis: null,
   };
+}
+
+function movementRowToReplayEnvelope(row: MovementRow) {
+  return envelopeFromRawTxRow(
+    {
+      signature: row.signature,
+      source:    'raw_transactions_replay',
+      raw_json:  {
+        replay_stub: true,
+        signature:   row.signature,
+      },
+      created_at: new Date().toISOString(),
+    } as any,
+    'raw_transactions_replay',
+  );
 }
 
 // ── Main handler ──────────────────────────────────────────────
@@ -370,6 +386,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const significantRows    = movements4h.filter(r => (r.amount_usd ?? 0) >= MIN_SOVEREIGN_USD);
 
     if (significantRows.length > 0) {
+      const replayEnvelopes = significantRows.map(movementRowToReplayEnvelope);
+      void replayEnvelopes;
       const normalized = significantRows.map(movementRowToNormalizedOutput);
 
       // Collect unique addresses for shadow map lookup
