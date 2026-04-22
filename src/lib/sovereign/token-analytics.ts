@@ -577,3 +577,61 @@ export async function getPrivacyLifecycleRiskCooccurrence(
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);
 }
+
+export interface PrivacyLifecycleSequenceStats {
+  by_stage_pair: Array<{ pair: string; count: number }>;
+  avg_elapsed_seconds: number;
+  high_confidence_count: number;
+}
+
+export async function getRecentPrivacyLifecycleSequenceStats(
+  db: Db,
+  hours: number = 24 * 7,
+): Promise<PrivacyLifecycleSequenceStats> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    rowsRes,
+    highConfRes,
+  ] = await Promise.all([
+    dba
+      .from('privacy_lifecycle_sequences')
+      .select('start_stage, end_stage, elapsed_seconds')
+      .gte('end_event_time', cutoff)
+      .limit(5000),
+    dba
+      .from('privacy_lifecycle_sequences')
+      .select('*', { count: 'exact', head: true })
+      .gte('end_event_time', cutoff)
+      .gte('sequence_confidence', 70),
+  ]);
+
+  const pairCounts = new Map<string, number>();
+  let elapsedSum = 0;
+  let elapsedN = 0;
+
+  for (const row of (rowsRes.data ?? []) as Array<{
+    start_stage: string;
+    end_stage: string;
+    elapsed_seconds: number | null;
+  }>) {
+    const pair = `${row.start_stage} -> ${row.end_stage}`;
+    pairCounts.set(pair, (pairCounts.get(pair) ?? 0) + 1);
+
+    if (typeof row.elapsed_seconds === 'number') {
+      elapsedSum += row.elapsed_seconds;
+      elapsedN += 1;
+    }
+  }
+
+  return {
+    by_stage_pair: [...pairCounts.entries()]
+      .map(([pair, count]) => ({ pair, count }))
+      .sort((a, b) => b.count - a.count),
+    avg_elapsed_seconds: elapsedN > 0 ? Math.round(elapsedSum / elapsedN) : 0,
+    high_confidence_count: (highConfRes.count as number | null) ?? 0,
+  };
+}
+

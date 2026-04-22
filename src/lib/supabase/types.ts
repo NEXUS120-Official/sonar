@@ -648,3 +648,31 @@ export interface PrivacyLifecycleEventRow {
   methodology_version:            string;
   created_at:                     string;
 }
+
+export interface PrivacyLifecycleSequenceRow {
+  sequence_id:          string;
+  start_event_id:       string;
+  end_event_id:         string;
+
+  start_signature:      string;
+  end_signature:        string;
+
+  token_mint:           string | null;
+  token_symbol:         string | null;
+  shadow_family_id:     string | null;
+
+  start_stage:          string;
+  end_stage:            string;
+  stage_path:           string[];
+
+  sequence_confidence:  number;
+  elapsed_seconds:      number | null;
+  sequence_reason:      string | null;
+
+  start_event_time:     string;
+  end_event_time:       string;
+
+  methodology_version:  string;
+  created_at:           string;
+}
+

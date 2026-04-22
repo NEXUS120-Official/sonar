@@ -43,6 +43,7 @@ import {
   decisionToAlertInsert,
 }                                            from '@/lib/sovereign/alert-engine';
 import type { NormalizedOutput }             from '@/lib/normalizer';
+import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 
 // ── Logging ───────────────────────────────────────────────────
@@ -435,6 +436,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               log('warn', `Privacy lifecycle event insert failed (non-critical): ${lifecycleErr.message}`);
             } else {
               log('info', `Privacy lifecycle events written: ${insertedLifecycle?.length ?? 0}`);
+            }
+
+            // ── Privacy lifecycle sequence persistence (Block 38) ─────
+            {
+              const lifecycleSequences = derivePrivacyLifecycleSequencesFromEvents(lifecycleEvents);
+
+              if (lifecycleSequences.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const { data: insertedSequences, error: sequenceErr } = await db
+                  .from('privacy_lifecycle_sequences')
+                  .upsert(lifecycleSequences as any, { onConflict: 'sequence_id' })
+                  .select('sequence_id');
+
+                if (sequenceErr) {
+                  log('warn', `Privacy lifecycle sequence insert failed (non-critical): ${sequenceErr.message}`);
+                } else {
+                  log('info', `Privacy lifecycle sequences written: ${insertedSequences?.length ?? 0}`);
+                }
+              } else {
+                log('info', 'Privacy lifecycle sequences: no forward stage progressions in this sovereign batch');
+              }
             }
           } else {
             log('info', 'Privacy lifecycle events: no non-none stages in this sovereign batch');
