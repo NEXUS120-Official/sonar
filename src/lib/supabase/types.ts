@@ -621,3 +621,30 @@ export interface Database {
     Enums: Record<string, never>;
   };
 }
+
+
+export interface PrivacyLifecycleEventRow {
+  event_id:                       string;
+  signature:                      string;
+  event_time:                     string;
+  persisted_at:                   string;
+  event_type:                     string;   // mirrors privacy_lifecycle_stage
+  privacy_lifecycle_stage:        string;
+  event_confidence:               number;
+  event_reason:                   string | null;
+
+  token_mint:                     string | null;
+  token_symbol:                   string | null;
+  amount_usd:                     number | null;
+
+  is_public_side:                 boolean;
+  shadow_source_exchange:         string | null;
+  shadow_family_id:               string | null;
+
+  family_member_role:             string;
+  family_coordination_posture:    string;
+  family_structure_strength:      number;
+
+  methodology_version:            string;
+  created_at:                     string;
+}

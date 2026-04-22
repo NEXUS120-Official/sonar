@@ -178,6 +178,81 @@ export interface FlushResult {
   attempts: number;
 }
 
+export interface PrivacyLifecycleEventInsert {
+  event_id:                    string;
+  signature:                   string;
+  event_time:                  string;
+  persisted_at:                string;
+  event_type:                  string;
+  privacy_lifecycle_stage:     string;
+  event_confidence:            number;
+  event_reason:                string | null;
+
+  token_mint:                  string | null;
+  token_symbol:                string | null;
+  amount_usd:                  number | null;
+
+  is_public_side:              boolean;
+  shadow_source_exchange:      string | null;
+  shadow_family_id:            string | null;
+
+  family_member_role:          string;
+  family_coordination_posture: string;
+  family_structure_strength:   number;
+
+  methodology_version:         string;
+}
+
+// ── Lifecycle event derivation (Block 36) ────────────────────
+
+function makePrivacyLifecycleEventId(
+  signal: PersistableSovereignSignal,
+): string {
+  return [
+    signal.signature,
+    signal.privacy_lifecycle_stage,
+    signal.token_mint ?? 'no_mint',
+    signal.shadow_family_id ?? 'no_family',
+  ].join('::');
+}
+
+export function derivePrivacyLifecycleEventsFromBatch(
+  batch: ReadonlyArray<PersistableSovereignSignal>,
+): PrivacyLifecycleEventInsert[] {
+  const out: PrivacyLifecycleEventInsert[] = [];
+
+  for (const signal of batch) {
+    if (!signal.privacy_lifecycle_stage || signal.privacy_lifecycle_stage === 'none') continue;
+
+    out.push({
+      event_id:                    makePrivacyLifecycleEventId(signal),
+      signature:                   signal.signature,
+      event_time:                  signal.block_time ?? signal.enriched_at,
+      persisted_at:                signal.persisted_at,
+      event_type:                  signal.privacy_lifecycle_stage,
+      privacy_lifecycle_stage:     signal.privacy_lifecycle_stage,
+      event_confidence:            signal.privacy_lifecycle_confidence,
+      event_reason:                signal.privacy_lifecycle_reason,
+
+      token_mint:                  signal.token_mint,
+      token_symbol:                signal.token_symbol,
+      amount_usd:                  signal.amount_usd,
+
+      is_public_side:              signal.privacy_public_side,
+      shadow_source_exchange:      signal.shadow_source_exchange,
+      shadow_family_id:            signal.shadow_family_id,
+
+      family_member_role:          signal.family_member_role,
+      family_coordination_posture: signal.family_coordination_posture,
+      family_structure_strength:   signal.family_structure_strength,
+
+      methodology_version:         signal.methodology_version,
+    });
+  }
+
+  return out;
+}
+
 // ── Signal converter ──────────────────────────────────────────
 
 type PrivacyLifecycleStage =

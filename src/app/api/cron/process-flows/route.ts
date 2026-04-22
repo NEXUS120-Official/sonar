@@ -34,7 +34,7 @@ import { buildPredictionFeatures }           from '@/lib/feature-builder';
 import { SNAPSHOT_WINDOWS, ALERT_COOLDOWNS_MS } from '@/lib/utils/constants';
 import type { MovementRow, FlowSnapshotRow, AlertRow, AlertType, BiasIndexHistoryRow } from '@/lib/supabase/types';
 import { createBoundPersistenceManager }     from '@/lib/sovereign/persistence-manager';
-import { joinAndAcceptBatch }                from '@/lib/sovereign/persistence-manager';
+import { joinAndAcceptBatch, derivePrivacyLifecycleEventsFromBatch } from '@/lib/sovereign/persistence-manager';
 import { loadJoinerShadowMap }               from '@/lib/sovereign/shadow-linker';
 import { loadJoinerShadowFamilyMap }         from '@/lib/sovereign/flow-joiner';
 import {
@@ -399,6 +399,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Evaluate in-memory buffer for intelligence-grade alerts
       if (joinResult.accepted > 0) {
         const buffer = manager.peekBuffer();
+
+        // ── Privacy lifecycle event persistence (Block 36) ────────
+        // Derived from the in-memory sovereign buffer BEFORE flush.
+        // Event-grade, replay-safe, additive.
+        {
+          const lifecycleEvents = derivePrivacyLifecycleEventsFromBatch(buffer);
+
+          if (lifecycleEvents.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: insertedLifecycle, error: lifecycleErr } = await db
+              .from('privacy_lifecycle_events')
+              .upsert(lifecycleEvents as any, { onConflict: 'event_id' })
+              .select('event_id');
+
+            if (lifecycleErr) {
+              log('warn', `Privacy lifecycle event insert failed (non-critical): ${lifecycleErr.message}`);
+            } else {
+              log('info', `Privacy lifecycle events written: ${insertedLifecycle?.length ?? 0}`);
+            }
+          } else {
+            log('info', 'Privacy lifecycle events: no non-none stages in this sovereign batch');
+          }
+        }
 
         // ── Family intelligence summary log ───────────────────────
         // Log-only: validates that shadow_family_* fields are being populated.
