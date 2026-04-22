@@ -301,3 +301,52 @@ export async function getRecentMintEnrichmentDepthStats(
     low_confidence:           (lowRes.count        as number | null) ?? 0,
   };
 }
+
+
+// ── 33C: privacy lifecycle stage stats ───────────────────────
+
+export interface PrivacyLifecycleStageStats {
+  by_stage: Array<{ stage: string; count: number }>;
+  public_side_count: number;
+  family_reemergence_count: number;
+}
+
+export async function getRecentPrivacyLifecycleStageStats(
+  db:    Db,
+  hours: number = 24 * 7,
+): Promise<PrivacyLifecycleStageStats> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    publicSideRes,
+    familyRes,
+    stageRowsRes,
+  ] = await Promise.all([
+    dba.from('sovereign_signals').select('*', { count: 'exact', head: true })
+      .gte('persisted_at', cutoff).eq('privacy_public_side', true),
+    dba.from('sovereign_signals').select('*', { count: 'exact', head: true })
+      .gte('persisted_at', cutoff).eq('privacy_reemergence_family_context', true),
+    dba.from('sovereign_signals')
+      .select('privacy_lifecycle_stage')
+      .gte('persisted_at', cutoff)
+      .limit(5000),
+  ]);
+
+  const counts = new Map<string, number>();
+  for (const row of (stageRowsRes.data ?? []) as Array<{ privacy_lifecycle_stage: string | null }>) {
+    const stage = row.privacy_lifecycle_stage ?? 'none';
+    counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+
+  const by_stage = [...counts.entries()]
+    .map(([stage, count]) => ({ stage, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    by_stage,
+    public_side_count:        (publicSideRes.count as number | null) ?? 0,
+    family_reemergence_count: (familyRes.count     as number | null) ?? 0,
+  };
+}

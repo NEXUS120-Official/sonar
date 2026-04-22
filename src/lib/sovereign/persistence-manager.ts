@@ -124,6 +124,13 @@ export interface PersistableSovereignSignal {
   has_asymmetric_token_delta:     boolean;
   possible_transfer_fee_behavior: boolean;
 
+  // ── Privacy lifecycle persistence (Block 33)
+  privacy_lifecycle_stage:            string;   // none | bridgehead_birth | privacy_staging | privacy_active | public_reemergence | downstream_after_reemergence | family_privacy_reemergence
+  privacy_lifecycle_confidence:       number;   // 0-100
+  privacy_lifecycle_reason:           string | null;
+  privacy_public_side:                boolean;
+  privacy_reemergence_family_context: boolean;
+
   // ── Signal quality (Source of Truth §16)
   signal_score:        number;
   signal_confidence:   string;    // ConfidenceTier
@@ -166,6 +173,133 @@ export interface FlushResult {
 
 // ── Signal converter ──────────────────────────────────────────
 
+type PrivacyLifecycleStage =
+  | 'none'
+  | 'bridgehead_birth'
+  | 'privacy_staging'
+  | 'privacy_active'
+  | 'public_reemergence'
+  | 'downstream_after_reemergence'
+  | 'family_privacy_reemergence';
+
+function derivePrivacyLifecycle(
+  signal: EnrichedSovereignSignal,
+  amountUsd: number | null,
+): {
+  stage: PrivacyLifecycleStage;
+  confidence: number;
+  reason: string | null;
+  public_side: boolean;
+  family_reemergence_context: boolean;
+} {
+  const usd = amountUsd ?? 0;
+  const ts  = signal.token_security;
+  const sh  = signal.shadow_context;
+  const fam = signal.shadow_family_context;
+
+  if (
+    fam.family_id &&
+    fam.has_privacy_activation &&
+    !ts.has_confidential_transfer &&
+    usd >= 10_000
+  ) {
+    return {
+      stage: 'family_privacy_reemergence',
+      confidence: fam.confidence ?? 60,
+      reason: 'privacy-activated family shows visible public-side continuation',
+      public_side: true,
+      family_reemergence_context: true,
+    };
+  }
+
+  if (
+    ts.is_token_2022 &&
+    !ts.has_confidential_transfer &&
+    usd >= 10_000 &&
+    (
+      signal.token_delta_analysis?.has_asymmetric_delta ||
+      signal.token_delta_analysis?.possible_transfer_fee ||
+      ts.has_transfer_hook
+    )
+  ) {
+    return {
+      stage: 'downstream_after_reemergence',
+      confidence: 60,
+      reason: 'public-side downstream continuation after privacy-capable context',
+      public_side: true,
+      family_reemergence_context: false,
+    };
+  }
+
+  if (
+    ts.is_token_2022 &&
+    !ts.has_confidential_transfer &&
+    usd >= 10_000 &&
+    (ts.has_auditor_key || sh.has_shadow_link)
+  ) {
+    return {
+      stage: 'public_reemergence',
+      confidence: sh.exchange_origin_confidence ?? (ts.has_auditor_key ? 55 : 45),
+      reason: 'privacy-capable asset re-emerged in visible public flow',
+      public_side: true,
+      family_reemergence_context: false,
+    };
+  }
+
+  if (
+    sh.has_shadow_link &&
+    ts.is_token_2022 &&
+    usd >= 10_000 &&
+    (
+      ts.has_transfer_hook ||
+      ts.has_permanent_delegate ||
+      ts.has_transfer_fee ||
+      signal.token_delta_analysis?.possible_transfer_fee
+    )
+  ) {
+    return {
+      stage: 'privacy_staging',
+      confidence: sh.exchange_origin_confidence ?? 55,
+      reason: 'exchange-linked Token-2022 wallet shows extension-sensitive privacy staging posture',
+      public_side: false,
+      family_reemergence_context: false,
+    };
+  }
+
+  if (
+    sh.has_shadow_link &&
+    ts.is_token_2022 &&
+    usd >= 10_000 &&
+    (ts.has_confidential_transfer || ts.has_auditor_key)
+  ) {
+    return {
+      stage: 'bridgehead_birth',
+      confidence: sh.exchange_origin_confidence ?? 60,
+      reason: 'shadow-linked Token-2022 wallet entered privacy-adjacent posture',
+      public_side: false,
+      family_reemergence_context: false,
+    };
+  }
+
+  if (ts.has_confidential_transfer) {
+    return {
+      stage: 'privacy_active',
+      confidence: 50,
+      reason: 'confidential transfer architecture active on this movement',
+      public_side: false,
+      family_reemergence_context: false,
+    };
+  }
+
+  return {
+    stage: 'none',
+    confidence: 0,
+    reason: null,
+    public_side: false,
+    family_reemergence_context: false,
+  };
+}
+
 /**
  * Convert an EnrichedSovereignSignal to a flat PersistableSovereignSignal.
  * Pure, deterministic, no side effects.
@@ -176,6 +310,12 @@ export function convertSignalToPayload(
 ): PersistableSovereignSignal {
   const rm = signal.raw_movement;
   const rt = signal.raw_token_movement;
+  const amountUsd =
+    (rm?.amount_usd as number | null) ??
+    (rt?.amount_usd as number | null) ??
+    null;
+
+  const privacyLifecycle = derivePrivacyLifecycle(signal, amountUsd);
 
   return {
     signature:           signal.signature,
@@ -188,7 +328,7 @@ export function convertSignalToPayload(
     from_address:   (rm?.from_address   as string | null) ?? null,
     to_address:     (rm?.to_address     as string | null) ?? null,
     amount_token:   (rm?.amount_token   as number | null) ?? (rt?.amount_token   as number | null) ?? null,
-    amount_usd:     (rm?.amount_usd     as number | null) ?? (rt?.amount_usd     as number | null) ?? null,
+    amount_usd:     amountUsd,
     token_mint:     signal.token_context?.mint            ?? (rt?.token_mint     as string | null) ?? null,
     token_symbol:   signal.token_context?.symbol          ?? (rt?.token_symbol   as string | null) ?? null,
     flow_type:      (rm?.flow_type      as string | null) ?? null,
@@ -249,6 +389,12 @@ export function convertSignalToPayload(
     shadow_family_has_fan_out:            signal.shadow_family_context.has_fan_out,
     shadow_family_has_fan_in:             signal.shadow_family_context.has_fan_in,
     shadow_family_has_temporal_correlation: signal.shadow_family_context.has_temporal_correlation,
+
+    privacy_lifecycle_stage:            privacyLifecycle.stage,
+    privacy_lifecycle_confidence:       privacyLifecycle.confidence,
+    privacy_lifecycle_reason:           privacyLifecycle.reason,
+    privacy_public_side:                privacyLifecycle.public_side,
+    privacy_reemergence_family_context: privacyLifecycle.family_reemergence_context,
 
     signal_score:       signal.signal_score,
     signal_confidence:  signal.signal_confidence,
