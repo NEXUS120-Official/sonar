@@ -263,6 +263,18 @@ export function registryEntryFromEnrichment(
     has_transfer_hook:         result.has_transfer_hook         || (existing?.has_transfer_hook ?? false),
     has_permanent_delegate:    result.has_permanent_delegate    || (existing?.has_permanent_delegate ?? false),
     has_auditor_key:           result.has_auditor_key           || (existing?.has_auditor_key ?? false),
+    transfer_fee_bps:          result.transfer_fee_bps          ?? existing?.transfer_fee_bps ?? null,
+    transfer_hook_program:     result.transfer_hook_program     ?? existing?.transfer_hook_program ?? null,
+    has_native_metadata:       result.has_native_metadata       || (existing?.has_native_metadata ?? false),
+    mint_authority:            result.mint_authority            ?? existing?.mint_authority ?? null,
+    freeze_authority:          result.freeze_authority          ?? existing?.freeze_authority ?? null,
+    metadata_source_mode:      result.has_native_metadata
+                                 ? 'native_token_metadata'
+                                 : (existing?.symbol || existing?.name)
+                                   ? (existing?.metadata_source_mode ?? 'db_token_metadata')
+                                   : 'unknown',
+    enrichment_confidence:     result.confidence,
+    enrichment_source:         result.enrichment_source,
     // Merge risk flags (union, deduplicated)
     risk_flags: [...new Set([...result.risk_flags, ...(existing?.risk_flags ?? [])])],
   };

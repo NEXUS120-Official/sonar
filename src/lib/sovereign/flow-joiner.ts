@@ -410,8 +410,29 @@ function buildTokenSecurityPosture(
     );
   }
   if (entry.has_transfer_fee) {
+    const feeText = entry.transfer_fee_bps !== null
+      ? `Transfer fee applies (${entry.transfer_fee_bps} bps): receiver nets less than sender sends — delta asymmetry expected`
+      : 'Transfer fee applies: receiver nets less than sender sends — delta asymmetry expected';
+    fog_piercing_notes.push(feeText);
+  }
+  if (entry.has_native_metadata) {
     fog_piercing_notes.push(
-      'Transfer fee applies: receiver nets less than sender sends — delta asymmetry expected',
+      'Native token metadata present: Token-2022 asset is self-describing without third-party metadata fetches',
+    );
+  }
+  if (entry.transfer_hook_program) {
+    fog_piercing_notes.push(
+      `Transfer hook program configured: ${entry.transfer_hook_program.slice(0, 8)}…`,
+    );
+  }
+  if (entry.freeze_authority !== null) {
+    fog_piercing_notes.push(
+      'Freeze authority present: issuer retains token-freeze control surface',
+    );
+  }
+  if (entry.mint_authority !== null) {
+    fog_piercing_notes.push(
+      'Mint authority live: token supply remains externally controllable',
     );
   }
   // ── 28C: Supplement from delta analysis ──────────────────────
@@ -464,25 +485,37 @@ function buildTokenSecurityPosture(
   } else if (entry.has_confidential_transfer) {
     security_summary = 'Token-2022 privacy token — confidential transfer architecture, amounts may be hidden';
   } else if (entry.has_transfer_fee || deltaAnalysis?.possible_transfer_fee) {
-    const confirmed = entry.has_transfer_fee ? 'confirmed' : 'possible (on-chain delta signal)';
+    const confirmed = entry.has_transfer_fee
+      ? (entry.transfer_fee_bps !== null ? `confirmed ${entry.transfer_fee_bps}bps` : 'confirmed')
+      : 'possible (on-chain delta signal)';
     security_summary = `Token-2022 with transfer fee (${confirmed}) — asymmetric sender/receiver deltas`;
   } else if (entry.has_transfer_hook) {
-    security_summary = 'Token-2022 with transfer hook — custom program logic on transfer';
+    security_summary = entry.transfer_hook_program
+      ? 'Token-2022 with transfer hook — custom program logic on transfer is configured'
+      : 'Token-2022 with transfer hook — custom program logic on transfer';
   } else if (entry.has_permanent_delegate) {
     security_summary = 'Token-2022 with permanent delegate — third-party control risk';
+  } else if (entry.has_native_metadata) {
+    security_summary = 'Token-2022 asset with native metadata — self-describing token architecture';
   } else {
     security_summary = 'Token-2022 asset — standard Token-2022 semantics, no privacy extensions detected';
   }
 
   // Confidence: was the entry actually enriched by the Mint Enricher?
   const enrichmentConfidence: 'high' | 'medium' | 'low' =
-    (effectiveIsToken2022 && (entry.has_transfer_fee || entry.has_confidential_transfer ||
-     entry.has_transfer_hook || entry.has_permanent_delegate || entry.has_auditor_key ||
-     effectiveProgramType !== 'unknown'))
+    entry.enrichment_confidence === 'high'
       ? 'high'
-      : effectiveProgramType !== 'unknown'
+      : entry.enrichment_confidence === 'medium'
         ? 'medium'
-        : 'low';
+        : (effectiveIsToken2022 && (entry.has_transfer_fee || entry.has_confidential_transfer ||
+           entry.has_transfer_hook || entry.has_permanent_delegate || entry.has_auditor_key ||
+           entry.has_native_metadata || entry.transfer_fee_bps !== null ||
+           entry.transfer_hook_program !== null || entry.freeze_authority !== null ||
+           entry.mint_authority !== null || effectiveProgramType !== 'unknown'))
+          ? 'high'
+          : effectiveProgramType !== 'unknown'
+            ? 'medium'
+            : 'low';
 
   return {
     token_program_type:        effectiveProgramType,

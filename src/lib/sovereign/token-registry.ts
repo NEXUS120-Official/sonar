@@ -47,6 +47,16 @@ export interface SovereignTokenRegistryEntry {
   /** Auditor key present in confidential-transfer extension. */
   has_auditor_key:           boolean;
 
+  // ── Deeper extension intelligence (Block 31) ───────────────
+  transfer_fee_bps:          number | null;
+  transfer_hook_program:     string | null;
+  has_native_metadata:       boolean;
+  mint_authority:            string | null;
+  freeze_authority:          string | null;
+  metadata_source_mode:      'well_known' | 'db_token_metadata' | 'native_token_metadata' | 'unknown';
+  enrichment_confidence:     'high' | 'medium' | 'low';
+  enrichment_source:         'sovereign_rpc_jsonparsed' | 'not_found' | 'rpc_error' | 'bootstrap' | 'unknown';
+
   /** Extensible risk flags, e.g. 'freeze_authority', 'mint_authority_live'. */
   risk_flags: string[];
 }
@@ -64,6 +74,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -72,6 +85,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -80,6 +96,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -88,6 +107,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -96,6 +118,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -104,6 +129,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -112,6 +140,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
   {
@@ -120,6 +151,9 @@ const WELL_KNOWN_ENTRIES: SovereignTokenRegistryEntry[] = [
     token_program: 'spl_token', is_pump_fun: false,
     has_transfer_fee: false, has_confidential_transfer: false,
     has_transfer_hook: false, has_permanent_delegate: false, has_auditor_key: false,
+    transfer_fee_bps: null, transfer_hook_program: null, has_native_metadata: false,
+    mint_authority: null, freeze_authority: null,
+    metadata_source_mode: 'well_known', enrichment_confidence: 'medium', enrichment_source: 'bootstrap',
     risk_flags: [],
   },
 ];
@@ -174,6 +208,14 @@ export function buildSovereignRegistry(
       has_transfer_hook:         false,
       has_permanent_delegate:    false,
       has_auditor_key:           false,
+      transfer_fee_bps:          null,
+      transfer_hook_program:     null,
+      has_native_metadata:       false,
+      mint_authority:            null,
+      freeze_authority:          null,
+      metadata_source_mode:      'db_token_metadata',
+      enrichment_confidence:     'low',
+      enrichment_source:         'unknown',
       risk_flags:                [],
     });
   }
@@ -220,8 +262,10 @@ export async function loadRegistryFromDb(): Promise<SovereignTokenRegistry> {
       anyDb
         .from('sovereign_mint_enrichments')
         .select(
-          'mint, token_program, decimals, has_transfer_fee, has_confidential_transfer, ' +
-          'has_transfer_hook, has_permanent_delegate, has_auditor_key, risk_flags',
+          'mint, token_program, decimals, mint_authority, freeze_authority, ' +
+          'has_transfer_fee, transfer_fee_bps, has_confidential_transfer, has_auditor_key, ' +
+          'has_transfer_hook, transfer_hook_program, has_permanent_delegate, has_native_metadata, ' +
+          'risk_flags, confidence, enrichment_source',
         )
         .limit(10_000),
     ]);
@@ -246,6 +290,14 @@ export async function loadRegistryFromDb(): Promise<SovereignTokenRegistry> {
         has_transfer_hook:         row.has_transfer_hook         || false,
         has_permanent_delegate:    row.has_permanent_delegate    || false,
         has_auditor_key:           row.has_auditor_key           || false,
+        transfer_fee_bps:          row.transfer_fee_bps          ?? null,
+        transfer_hook_program:     row.transfer_hook_program     ?? null,
+        has_native_metadata:       row.has_native_metadata       || false,
+        mint_authority:            row.mint_authority            ?? null,
+        freeze_authority:          row.freeze_authority          ?? null,
+        metadata_source_mode:      row.has_native_metadata ? 'native_token_metadata' : (existing?.metadata_source_mode ?? 'unknown'),
+        enrichment_confidence:     (row.confidence as 'high' | 'medium' | 'low') ?? (existing?.enrichment_confidence ?? 'low'),
+        enrichment_source:         (row.enrichment_source as 'sovereign_rpc_jsonparsed' | 'not_found' | 'rpc_error' | 'bootstrap' | 'unknown') ?? (existing?.enrichment_source ?? 'unknown'),
         risk_flags:    Array.isArray(row.risk_flags) ? row.risk_flags : [],
       });
     }

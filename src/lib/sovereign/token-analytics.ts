@@ -234,3 +234,70 @@ export async function getRecentToken2022ContextStats(
     top_risk_flags,
   };
 }
+
+
+// ── 31D: deeper mint enrichment depth stats ───────────────────
+
+export interface MintEnrichmentDepthStats {
+  total_enriched_mints:     number;
+  with_native_metadata:     number;
+  with_transfer_fee_bps:    number;
+  with_transfer_hook_prog:  number;
+  with_freeze_authority:    number;
+  with_mint_authority_live: number;
+  high_confidence:          number;
+  medium_confidence:        number;
+  low_confidence:           number;
+}
+
+export async function getRecentMintEnrichmentDepthStats(
+  db:    Db,
+  hours: number = 24 * 7,
+): Promise<MintEnrichmentDepthStats> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    totalRes,
+    nativeMetaRes,
+    feeBpsRes,
+    hookProgRes,
+    freezeAuthRes,
+    mintAuthRes,
+    hiRes,
+    medRes,
+    lowRes,
+  ] = await Promise.all([
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).eq('has_native_metadata', true),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).not('transfer_fee_bps', 'is', null),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).not('transfer_hook_program', 'is', null),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).not('freeze_authority', 'is', null),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).not('mint_authority', 'is', null),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).eq('confidence', 'high'),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).eq('confidence', 'medium'),
+    dba.from('sovereign_mint_enrichments').select('*', { count: 'exact', head: true })
+      .gte('updated_at', cutoff).eq('confidence', 'low'),
+  ]);
+
+  return {
+    total_enriched_mints:     (totalRes.count      as number | null) ?? 0,
+    with_native_metadata:     (nativeMetaRes.count as number | null) ?? 0,
+    with_transfer_fee_bps:    (feeBpsRes.count     as number | null) ?? 0,
+    with_transfer_hook_prog:  (hookProgRes.count   as number | null) ?? 0,
+    with_freeze_authority:    (freezeAuthRes.count as number | null) ?? 0,
+    with_mint_authority_live: (mintAuthRes.count   as number | null) ?? 0,
+    high_confidence:          (hiRes.count         as number | null) ?? 0,
+    medium_confidence:        (medRes.count        as number | null) ?? 0,
+    low_confidence:           (lowRes.count        as number | null) ?? 0,
+  };
+}
