@@ -350,3 +350,230 @@ export async function getRecentPrivacyLifecycleStageStats(
     family_reemergence_count: (familyRes.count     as number | null) ?? 0,
   };
 }
+
+
+// ── 34A: privacy lifecycle token breakdown ───────────────────
+
+export interface PrivacyLifecycleTokenBreakdownRow {
+  token_mint:   string;
+  token_symbol: string | null;
+  stage:        string;
+  signal_count: number;
+  total_usd:    number;
+}
+
+export async function getPrivacyLifecycleTokenBreakdown(
+  db:    Db,
+  hours: number = 24 * 7,
+  limit: number = 50,
+): Promise<PrivacyLifecycleTokenBreakdownRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('sovereign_signals')
+    .select('token_mint, token_symbol, privacy_lifecycle_stage, amount_usd')
+    .gte('persisted_at', cutoff)
+    .not('token_mint', 'is', null)
+    .not('privacy_lifecycle_stage', 'is', null)
+    .neq('privacy_lifecycle_stage', 'none')
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleTokenBreakdownRow>();
+
+  for (const row of (data ?? []) as Array<{
+    token_mint: string | null;
+    token_symbol: string | null;
+    privacy_lifecycle_stage: string | null;
+    amount_usd: number | null;
+  }>) {
+    if (!row.token_mint || !row.privacy_lifecycle_stage) continue;
+    const key = `${row.token_mint}::${row.privacy_lifecycle_stage}`;
+    const prev = agg.get(key);
+    if (prev) {
+      prev.signal_count += 1;
+      prev.total_usd += row.amount_usd ?? 0;
+    } else {
+      agg.set(key, {
+        token_mint:   row.token_mint,
+        token_symbol: row.token_symbol,
+        stage:        row.privacy_lifecycle_stage,
+        signal_count: 1,
+        total_usd:    row.amount_usd ?? 0,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.total_usd - a.total_usd) || (b.signal_count - a.signal_count))
+    .slice(0, limit);
+}
+
+// ── 34B: privacy lifecycle exchange-origin breakdown ─────────
+
+export interface PrivacyLifecycleExchangeBreakdownRow {
+  source_exchange: string;
+  stage:           string;
+  signal_count:    number;
+  total_usd:       number;
+  public_side_count: number;
+}
+
+export async function getPrivacyLifecycleExchangeBreakdown(
+  db:    Db,
+  hours: number = 24 * 7,
+): Promise<PrivacyLifecycleExchangeBreakdownRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('sovereign_signals')
+    .select('shadow_source_exchange, shadow_family_source_exchange, privacy_lifecycle_stage, amount_usd, privacy_public_side')
+    .gte('persisted_at', cutoff)
+    .neq('privacy_lifecycle_stage', 'none')
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleExchangeBreakdownRow>();
+
+  for (const row of (data ?? []) as Array<{
+    shadow_source_exchange: string | null;
+    shadow_family_source_exchange: string | null;
+    privacy_lifecycle_stage: string | null;
+    amount_usd: number | null;
+    privacy_public_side: boolean | null;
+  }>) {
+    const ex = row.shadow_source_exchange ?? row.shadow_family_source_exchange ?? 'unknown';
+    const stage = row.privacy_lifecycle_stage ?? 'none';
+    const key = `${ex}::${stage}`;
+    const prev = agg.get(key);
+
+    if (prev) {
+      prev.signal_count += 1;
+      prev.total_usd += row.amount_usd ?? 0;
+      prev.public_side_count += row.privacy_public_side ? 1 : 0;
+    } else {
+      agg.set(key, {
+        source_exchange:  ex,
+        stage,
+        signal_count:     1,
+        total_usd:        row.amount_usd ?? 0,
+        public_side_count: row.privacy_public_side ? 1 : 0,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.signal_count - a.signal_count) || (b.total_usd - a.total_usd));
+}
+
+// ── 34C: family privacy re-emergence leaderboard ─────────────
+
+export interface PrivacyLifecycleFamilyLeaderboardRow {
+  family_id:         string;
+  source_exchange:   string | null;
+  signal_count:      number;
+  total_usd:         number;
+  max_family_confidence: number | null;
+  stage_counts:      Record<string, number>;
+}
+
+export async function getPrivacyLifecycleFamilyLeaderboard(
+  db:    Db,
+  hours: number = 24 * 7,
+  limit: number = 25,
+): Promise<PrivacyLifecycleFamilyLeaderboardRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('sovereign_signals')
+    .select('shadow_family_id, shadow_family_source_exchange, shadow_family_confidence, privacy_lifecycle_stage, amount_usd')
+    .gte('persisted_at', cutoff)
+    .not('shadow_family_id', 'is', null)
+    .neq('privacy_lifecycle_stage', 'none')
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleFamilyLeaderboardRow>();
+
+  for (const row of (data ?? []) as Array<{
+    shadow_family_id: string | null;
+    shadow_family_source_exchange: string | null;
+    shadow_family_confidence: number | null;
+    privacy_lifecycle_stage: string | null;
+    amount_usd: number | null;
+  }>) {
+    if (!row.shadow_family_id) continue;
+    const prev = agg.get(row.shadow_family_id);
+    const stage = row.privacy_lifecycle_stage ?? 'none';
+
+    if (prev) {
+      prev.signal_count += 1;
+      prev.total_usd += row.amount_usd ?? 0;
+      prev.max_family_confidence = Math.max(prev.max_family_confidence ?? 0, row.shadow_family_confidence ?? 0);
+      prev.stage_counts[stage] = (prev.stage_counts[stage] ?? 0) + 1;
+    } else {
+      agg.set(row.shadow_family_id, {
+        family_id: row.shadow_family_id,
+        source_exchange: row.shadow_family_source_exchange,
+        signal_count: 1,
+        total_usd: row.amount_usd ?? 0,
+        max_family_confidence: row.shadow_family_confidence,
+        stage_counts: { [stage]: 1 },
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.signal_count - a.signal_count) || (b.total_usd - a.total_usd))
+    .slice(0, limit);
+}
+
+// ── 34D: privacy lifecycle × risk flag co-occurrence ─────────
+
+export interface PrivacyLifecycleRiskCooccurrenceRow {
+  stage: string;
+  risk_flag: string;
+  count: number;
+}
+
+export async function getPrivacyLifecycleRiskCooccurrence(
+  db:    Db,
+  hours: number = 24 * 7,
+  limit: number = 50,
+): Promise<PrivacyLifecycleRiskCooccurrenceRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('sovereign_signals')
+    .select('privacy_lifecycle_stage, token_risk_flags')
+    .gte('persisted_at', cutoff)
+    .neq('privacy_lifecycle_stage', 'none')
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleRiskCooccurrenceRow>();
+
+  for (const row of (data ?? []) as Array<{
+    privacy_lifecycle_stage: string | null;
+    token_risk_flags: string[] | null;
+  }>) {
+    const stage = row.privacy_lifecycle_stage ?? 'none';
+    for (const flag of row.token_risk_flags ?? []) {
+      const key = `${stage}::${flag}`;
+      const prev = agg.get(key);
+      if (prev) {
+        prev.count += 1;
+      } else {
+        agg.set(key, { stage, risk_flag: flag, count: 1 });
+      }
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
