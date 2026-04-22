@@ -50,7 +50,10 @@ export type AlertType =
   | 'privacy_adjacent_token_activity'   // privacy-adjacent Token-2022 architecture
   | 'privacy_bridgehead_birth'          // shadow-linked Token-2022 wallet enters privacy-adjacent posture
   | 'exchange_funded_privacy_staging'   // exchange-linked Token-2022 extension-sensitive staging
-  | 'family_privacy_bridgehead';        // family-level privacy activation becomes operationally visible
+  | 'family_privacy_bridgehead'         // family-level privacy activation becomes operationally visible
+  | 'privacy_exit_to_public_flow'       // privacy-capable asset re-emerges in visible public flow
+  | 'post_privacy_downstream_move'      // downstream public-side move after privacy-capable context
+  | 'family_privacy_reemergence';       // family-level privacy re-emergence into public-side activity
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 

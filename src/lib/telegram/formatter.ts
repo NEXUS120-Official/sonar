@@ -70,6 +70,10 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   privacy_bridgehead_birth:       '🌫️ Privacy Bridgehead Birth',
   exchange_funded_privacy_staging:'🏦 Exchange-Funded Privacy Staging',
   family_privacy_bridgehead:      '🕸️ Family Privacy Bridgehead',
+  // ── Privacy re-emergence archetypes (Block 32) ───────────────
+  privacy_exit_to_public_flow:    '🌤️ Privacy Exit to Public Flow',
+  post_privacy_downstream_move:   '➡️ Post-Privacy Downstream Move',
+  family_privacy_reemergence:     '🕸️ Family Privacy Re-Emergence',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────

@@ -50,7 +50,10 @@ export type AlertArchetype =
   | 'privacy_adjacent_token_activity'
   | 'privacy_bridgehead_birth'
   | 'exchange_funded_privacy_staging'
-  | 'family_privacy_bridgehead';
+  | 'family_privacy_bridgehead'
+  | 'privacy_exit_to_public_flow'
+  | 'post_privacy_downstream_move'
+  | 'family_privacy_reemergence';
 
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -151,6 +154,22 @@ const MIN_PRIVACY_BRIDGEHEAD_INTEL   = 40;
 const MIN_PRIVACY_STAGING_INTEL      = 35;
 const MIN_FAMILY_PRIVACY_BRIDGE_INTEL = 40;
 
+// ── Privacy re-emergence thresholds (Block 32) ───────────────
+// Conservative: require visible public-side continuation after
+// privacy-capable / privacy-activated context.
+
+const PRIVACY_EXIT_BONUS            = 10;
+const POST_PRIVACY_DOWNSTREAM_BONUS = 8;
+const FAMILY_REEMERGENCE_BONUS      = 10;
+
+const MIN_PRIVACY_EXIT_USD          = 10_000;
+const MIN_POST_PRIVACY_DOWNSTREAM_USD = 10_000;
+const MIN_FAMILY_REEMERGENCE_USD    = 10_000;
+
+const MIN_PRIVACY_EXIT_INTEL        = 35;
+const MIN_POST_PRIVACY_DOWNSTREAM_INTEL = 35;
+const MIN_FAMILY_REEMERGENCE_INTEL  = 40;
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function formatUsd(n: number): string {
@@ -250,6 +269,35 @@ function scoreSignal(sig: PersistableSovereignSignal): number {
     score += FAMILY_PRIVACY_BRIDGE_BONUS;
   }
 
+  // Block 32 — privacy re-emergence bonuses (conservative)
+  if (
+    sig.is_token_2022 &&
+    !sig.has_confidential_transfer &&
+    (sig.has_auditor_key || sig.has_shadow_link)
+  ) {
+    score += PRIVACY_EXIT_BONUS;
+  }
+
+  if (
+    sig.is_token_2022 &&
+    !sig.has_confidential_transfer &&
+    (
+      sig.has_asymmetric_token_delta ||
+      sig.possible_transfer_fee_behavior ||
+      sig.has_transfer_hook
+    )
+  ) {
+    score += POST_PRIVACY_DOWNSTREAM_BONUS;
+  }
+
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_privacy_activation &&
+    !sig.has_confidential_transfer
+  ) {
+    score += FAMILY_REEMERGENCE_BONUS;
+  }
+
   return Math.min(100, score);
 }
 
@@ -304,6 +352,40 @@ function classifyArchetype(
     (sig.amount_usd ?? 0) >= MIN_FAMILY_PRIVACY_BRIDGE_USD
   ) {
     return 'family_privacy_bridgehead';
+  }
+
+  // family_privacy_reemergence: privacy-activated family shows visible public-side continuation
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_privacy_activation &&
+    !sig.has_confidential_transfer &&
+    (sig.amount_usd ?? 0) >= MIN_FAMILY_REEMERGENCE_USD
+  ) {
+    return 'family_privacy_reemergence';
+  }
+
+  // post_privacy_downstream_move: public-side downstream move after privacy-capable context
+  if (
+    sig.is_token_2022 &&
+    !sig.has_confidential_transfer &&
+    (sig.amount_usd ?? 0) >= MIN_POST_PRIVACY_DOWNSTREAM_USD &&
+    (
+      sig.has_asymmetric_token_delta ||
+      sig.possible_transfer_fee_behavior ||
+      sig.has_transfer_hook
+    )
+  ) {
+    return 'post_privacy_downstream_move';
+  }
+
+  // privacy_exit_to_public_flow: privacy-capable asset re-emerges in visible public flow
+  if (
+    sig.is_token_2022 &&
+    !sig.has_confidential_transfer &&
+    (sig.amount_usd ?? 0) >= MIN_PRIVACY_EXIT_USD &&
+    (sig.has_auditor_key || sig.has_shadow_link)
+  ) {
+    return 'privacy_exit_to_public_flow';
   }
 
   // exchange_shadow_birth: shadow link + privacy architecture activated
@@ -417,6 +499,11 @@ function toConsolidationKey(archetype: AlertArchetype, sig: PersistableSovereign
     case 'exchange_funded_privacy_staging':
       return `${archetype}::${sig.shadow_source_exchange ?? 'unknown'}::${sig.token_mint ?? 'unknown'}`;
     case 'family_privacy_bridgehead':
+      return `${archetype}::${sig.shadow_family_id ?? 'unknown'}`;
+    case 'privacy_exit_to_public_flow':
+    case 'post_privacy_downstream_move':
+      return `${archetype}::${sig.token_mint ?? 'unknown'}`;
+    case 'family_privacy_reemergence':
       return `${archetype}::${sig.shadow_family_id ?? 'unknown'}`;
     case 'sovereign_high_confidence':
       return `${archetype}::${sig.signal_confidence}`;
@@ -626,6 +713,50 @@ function buildAlertContent(
       };
     }
 
+    case 'privacy_exit_to_public_flow': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Privacy Exit to Public Flow — ${tokenId}`,
+        body:
+          `${amtStr} moved through a privacy-capable Token-2022 asset in visible public-side flow. ` +
+          `Confidential transfer: not detected on this movement. ` +
+          `Auditor key: ${sig.has_auditor_key ? 'present' : 'not detected'}. ` +
+          `Interpretation: public re-emergence after privacy-capable context, not hidden-amount visibility. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'post_privacy_downstream_move': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Post-Privacy Downstream Move — ${tokenId}`,
+        body:
+          `${amtStr} moved in public-side continuation after privacy-capable context. ` +
+          `Signals: ${[
+            sig.has_asymmetric_token_delta ? 'asymmetric token delta' : null,
+            sig.possible_transfer_fee_behavior ? 'possible transfer-fee behavior' : null,
+            sig.has_transfer_hook ? 'transfer hook' : null,
+          ].filter(Boolean).join(', ') || 'downstream continuation'}. ` +
+          `Interpretation remains structural and downstream-oriented. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'family_privacy_reemergence': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      const familyEx = sig.shadow_family_source_exchange ?? exch;
+      return {
+        title: `Family Privacy Re-Emergence — ${tokenId}`,
+        body:
+          `${amtStr} moved through a privacy-activated shadow family in visible public-side continuation. ` +
+          `Family source: ${familyEx}. ` +
+          `Family size: ${sig.shadow_family_total_members ?? '?'}. ` +
+          `Confidential transfer: not detected on this movement. ` +
+          `Interpretation indicates family-level re-emergence, not visibility into shielded amounts. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
     case 'shadow_family_fan_out': {
       const members  = sig.shadow_family_total_members ?? '?';
       const familyEx = sig.shadow_family_source_exchange ?? exch;
@@ -707,6 +838,15 @@ export function evaluateSignalsForAlerts(
       (archetype === 'privacy_bridgehead_birth' && intel_score < MIN_PRIVACY_BRIDGEHEAD_INTEL) ||
       (archetype === 'exchange_funded_privacy_staging' && intel_score < MIN_PRIVACY_STAGING_INTEL) ||
       (archetype === 'family_privacy_bridgehead' && intel_score < MIN_FAMILY_PRIVACY_BRIDGE_INTEL)
+    ) {
+      continue;
+    }
+
+    // Block 32 — privacy re-emergence promotion gates
+    if (
+      (archetype === 'privacy_exit_to_public_flow' && intel_score < MIN_PRIVACY_EXIT_INTEL) ||
+      (archetype === 'post_privacy_downstream_move' && intel_score < MIN_POST_PRIVACY_DOWNSTREAM_INTEL) ||
+      (archetype === 'family_privacy_reemergence' && intel_score < MIN_FAMILY_REEMERGENCE_INTEL)
     ) {
       continue;
     }
@@ -807,6 +947,9 @@ export function decisionToAlertInsert(decision: SovereignAlertDecision): AlertIn
     privacy_bridgehead_birth:        'privacy_bridgehead_birth',
     exchange_funded_privacy_staging: 'exchange_funded_privacy_staging',
     family_privacy_bridgehead:       'family_privacy_bridgehead',
+    privacy_exit_to_public_flow:     'privacy_exit_to_public_flow',
+    post_privacy_downstream_move:    'post_privacy_downstream_move',
+    family_privacy_reemergence:      'family_privacy_reemergence',
   };
 
   return {

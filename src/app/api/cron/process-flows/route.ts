@@ -426,6 +426,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'possible_transfer_fee_flow', 'privacy_adjacent_token_activity',
           'privacy_bridgehead_birth', 'exchange_funded_privacy_staging',
           'family_privacy_bridgehead',
+          'privacy_exit_to_public_flow', 'post_privacy_downstream_move',
+          'family_privacy_reemergence',
         ];
         const sovereignCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
         const { data: recentSovereignRaw } = await db
@@ -468,18 +470,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             d.archetype === 'family_privacy_bridgehead'
           );
 
+          const reemergenceAlerts = decisions.filter(d =>
+            d.archetype === 'privacy_exit_to_public_flow' ||
+            d.archetype === 'post_privacy_downstream_move' ||
+            d.archetype === 'family_privacy_reemergence'
+          );
+
           const asymmetricCount = buffer.filter(s => s.has_asymmetric_token_delta).length;
           const feeLikeCount    = buffer.filter(s => s.possible_transfer_fee_behavior).length;
           const privacyAdjCount = buffer.filter(s => s.is_token_2022 && (s.has_confidential_transfer || s.has_auditor_key)).length;
           const familyPrivacyCount = buffer.filter(s => s.shadow_family_has_privacy_activation).length;
+          const publicSidePrivacyCount = buffer.filter(s =>
+            s.is_token_2022 &&
+            !s.has_confidential_transfer &&
+            (s.has_auditor_key || s.has_shadow_link || s.shadow_family_has_privacy_activation)
+          ).length;
 
           log(
             'info',
             `Token-aware summary: ${tokenAwareSignals}/${buffer.length} token-aware signals, ` +
             `${tokenAwareAlerts.length} token-aware alert(s), ` +
             `${bridgeheadAlerts.length} privacy-bridgehead alert(s), ` +
+            `${reemergenceAlerts.length} privacy-reemergence alert(s), ` +
             `${asymmetricCount} asymmetric-delta, ${feeLikeCount} possible-fee, ` +
-            `${privacyAdjCount} privacy-adjacent, ${familyPrivacyCount} family-privacy`,
+            `${privacyAdjCount} privacy-adjacent, ${familyPrivacyCount} family-privacy, ` +
+            `${publicSidePrivacyCount} public-side-privacy-context`,
           );
         }
 
