@@ -61,6 +61,11 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   // ── Shadow family archetypes (Block 26) ──────────────────────
   shadow_family_fan_out:     '🕸️ Shadow Family Fan-Out',
   shadow_gas_funding_chain:  '⛽ Shadow Gas-Funding Chain',
+  // ── Token-aware archetypes (Block 29) ────────────────────────
+  token2022_extension_sensitive:  '🧬 Token-2022 Extension-Sensitive Asset',
+  asymmetric_token_delta:         '⚖️ Asymmetric Token Delta',
+  possible_transfer_fee_flow:     '💸 Possible Transfer-Fee Flow',
+  privacy_adjacent_token_activity:'🫥 Privacy-Adjacent Token Activity',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────

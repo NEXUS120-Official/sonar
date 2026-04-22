@@ -422,6 +422,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'privacy_token_activity', 'cluster_synchronized_flow',
           'sovereign_high_confidence',
           'shadow_family_fan_out', 'shadow_gas_funding_chain',
+          'token2022_extension_sensitive', 'asymmetric_token_delta',
+          'possible_transfer_fee_flow', 'privacy_adjacent_token_activity',
         ];
         const sovereignCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
         const { data: recentSovereignRaw } = await db
@@ -443,6 +445,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         const candidates = evaluateSignalsForAlerts(buffer, recentSovereignKeys);
         const decisions  = consolidateAlerts(candidates);
+
+        {
+          const tokenAwareSignals = buffer.filter(s =>
+            s.is_token_2022 ||
+            s.has_asymmetric_token_delta ||
+            s.possible_transfer_fee_behavior
+          ).length;
+
+          const tokenAwareAlerts = decisions.filter(d =>
+            d.archetype === 'token2022_extension_sensitive' ||
+            d.archetype === 'asymmetric_token_delta' ||
+            d.archetype === 'possible_transfer_fee_flow' ||
+            d.archetype === 'privacy_adjacent_token_activity'
+          );
+
+          const asymmetricCount = buffer.filter(s => s.has_asymmetric_token_delta).length;
+          const feeLikeCount    = buffer.filter(s => s.possible_transfer_fee_behavior).length;
+          const privacyAdjCount = buffer.filter(s => s.is_token_2022 && (s.has_confidential_transfer || s.has_auditor_key)).length;
+
+          log(
+            'info',
+            `Token-aware summary: ${tokenAwareSignals}/${buffer.length} token-aware signals, ` +
+            `${tokenAwareAlerts.length} token-aware alert(s), ` +
+            `${asymmetricCount} asymmetric-delta, ${feeLikeCount} possible-fee, ${privacyAdjCount} privacy-adjacent`,
+          );
+        }
 
         if (decisions.length > 0) {
           const sovereignAlerts = decisions.map(decisionToAlertInsert);

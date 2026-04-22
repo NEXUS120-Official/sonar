@@ -43,7 +43,11 @@ export type AlertType =
   | 'sovereign_high_confidence'   // joiner direct_proof / strong_evidence
   // ── Shadow family archetypes (Block 26) ──────────────────────
   | 'shadow_family_fan_out'       // family root funded ≥3 child wallets
-  | 'shadow_gas_funding_chain';   // gas-funding lineage chain detected
+  | 'shadow_gas_funding_chain'          // gas-funding lineage chain detected
+  | 'token2022_extension_sensitive'     // Token-2022 extension-sensitive posture
+  | 'asymmetric_token_delta'            // structural sender/receiver token asymmetry
+  | 'possible_transfer_fee_flow'        // delta pattern consistent with fee-on-transfer behavior
+  | 'privacy_adjacent_token_activity';  // privacy-adjacent Token-2022 architecture
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 

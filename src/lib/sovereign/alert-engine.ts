@@ -43,7 +43,11 @@ export type AlertArchetype =
   | 'cluster_synchronized_flow'   // cluster members acting in coordination
   | 'sovereign_high_confidence'   // joiner-scored direct_proof or strong_evidence
   | 'shadow_family_fan_out'       // family root funded ≥3 child wallets (Block 26)
-  | 'shadow_gas_funding_chain';   // gas-funding lineage chain detected (Block 26)
+  | 'shadow_gas_funding_chain'    // gas-funding lineage chain detected (Block 26)
+  | 'token2022_extension_sensitive'
+  | 'asymmetric_token_delta'
+  | 'possible_transfer_fee_flow'
+  | 'privacy_adjacent_token_activity';
 
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -114,6 +118,21 @@ const MIN_FAN_OUT_MEMBERS_FOR_ALERT = 3;
  *  (less ambiguous than fan-out which could be benign multi-wallet use). */
 const MIN_GAS_CHAIN_CONF_FOR_ALERT = 25;
 
+// ── Token-aware promotion thresholds (Block 29) ──────────────
+// Conservative gates: token-aware alerts must be meaningful,
+// sparse, and operationally useful.
+
+const TOKEN2022_EXTENSION_BONUS = 8;
+const ASYMMETRIC_DELTA_BONUS    = 10;
+const POSSIBLE_FEE_BONUS        = 6;
+const PRIVACY_ADJACENT_BONUS    = 8;
+
+const MIN_TOKEN_AWARE_USD                 = 10_000;
+const MIN_ASYMMETRIC_DELTA_USD            = 15_000;
+const MIN_PRIVACY_ADJACENT_USD            = 10_000;
+const MIN_TOKEN_AWARE_INTEL_SCORE         = 30;
+const MIN_EXTENSION_SENSITIVE_INTEL_SCORE = 35;
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function formatUsd(n: number): string {
@@ -159,6 +178,31 @@ function scoreSignal(sig: PersistableSovereignSignal): number {
     else               score += FAMILY_BONUS_LOW;
   }
 
+  // Block 29 — token-aware bonuses (conservative)
+  if (sig.is_token_2022 && (
+    sig.has_transfer_hook ||
+    sig.has_permanent_delegate ||
+    sig.has_auditor_key ||
+    sig.has_transfer_fee
+  )) {
+    score += TOKEN2022_EXTENSION_BONUS;
+  }
+
+  if (sig.has_asymmetric_token_delta) {
+    score += ASYMMETRIC_DELTA_BONUS;
+  }
+
+  if (sig.possible_transfer_fee_behavior) {
+    score += POSSIBLE_FEE_BONUS;
+  }
+
+  if (sig.is_token_2022 && (
+    sig.has_confidential_transfer ||
+    sig.has_auditor_key
+  )) {
+    score += PRIVACY_ADJACENT_BONUS;
+  }
+
   return Math.min(100, score);
 }
 
@@ -189,6 +233,48 @@ function classifyArchetype(
   // cluster_synchronized_flow: cluster member + significant flow
   if (sig.cluster_type && (sig.amount_usd ?? 0) >= minSignificantUsd) {
     return 'cluster_synchronized_flow';
+  }
+
+  // token2022_extension_sensitive: Token-2022 with meaningful extension-sensitive posture
+  if (
+    sig.is_token_2022 &&
+    (sig.amount_usd ?? 0) >= MIN_TOKEN_AWARE_USD &&
+    (
+      sig.has_transfer_hook ||
+      sig.has_permanent_delegate ||
+      sig.has_auditor_key ||
+      sig.has_transfer_fee
+    )
+  ) {
+    return 'token2022_extension_sensitive';
+  }
+
+  // asymmetric_token_delta: structural asymmetry on meaningful token flow
+  if (
+    sig.has_asymmetric_token_delta &&
+    (sig.amount_usd ?? 0) >= MIN_ASYMMETRIC_DELTA_USD
+  ) {
+    return 'asymmetric_token_delta';
+  }
+
+  // possible_transfer_fee_flow: delta pattern consistent with fee-on-transfer behavior
+  if (
+    sig.possible_transfer_fee_behavior &&
+    (sig.amount_usd ?? 0) >= MIN_TOKEN_AWARE_USD
+  ) {
+    return 'possible_transfer_fee_flow';
+  }
+
+  // privacy_adjacent_token_activity: privacy-adjacent architecture without overclaiming hidden amounts
+  if (
+    sig.is_token_2022 &&
+    (sig.amount_usd ?? 0) >= MIN_PRIVACY_ADJACENT_USD &&
+    (
+      sig.has_confidential_transfer ||
+      sig.has_auditor_key
+    )
+  ) {
+    return 'privacy_adjacent_token_activity';
   }
 
   // shadow_family_fan_out: family with ≥3 children, confidence gate, member count gate
@@ -241,6 +327,11 @@ function toConsolidationKey(archetype: AlertArchetype, sig: PersistableSovereign
     case 'shadow_family_fan_out':
     case 'shadow_gas_funding_chain':
       return `${archetype}::${sig.shadow_family_id ?? 'unknown'}`;
+    case 'token2022_extension_sensitive':
+    case 'asymmetric_token_delta':
+    case 'possible_transfer_fee_flow':
+    case 'privacy_adjacent_token_activity':
+      return `${archetype}::${sig.token_mint ?? 'unknown'}`;
     case 'sovereign_high_confidence':
       return `${archetype}::${sig.signal_confidence}`;
   }
@@ -348,6 +439,60 @@ function buildAlertContent(
           `Sovereign confidence: ${sig.signal_confidence}.`,
       };
 
+    case 'token2022_extension_sensitive': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      const posture = [
+        sig.has_transfer_hook ? 'transfer hook' : null,
+        sig.has_permanent_delegate ? 'permanent delegate' : null,
+        sig.has_auditor_key ? 'auditor key' : null,
+        sig.has_transfer_fee ? 'confirmed transfer fee' : null,
+      ].filter(Boolean).join(', ') || 'extension-sensitive posture';
+      return {
+        title: `Token-2022 Extension-Sensitive Asset — ${tokenId}`,
+        body:
+          `${amtStr} moved through a Token-2022 asset with ${posture}. ` +
+          `Token: ${sig.token_symbol ?? sig.token_mint ?? 'unknown'}. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || 'structural Token-2022 posture detected'}.`,
+      };
+    }
+
+    case 'asymmetric_token_delta': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Asymmetric Token Delta — ${tokenId}`,
+        body:
+          `${amtStr} token flow showed asymmetric sender/receiver deltas. ` +
+          `Pattern: ${sig.token_delta_pattern ?? 'unknown'}. ` +
+          `Interpretation: structural asymmetry consistent with fee-on-transfer logic or multi-leg routing, not confirmed by itself. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'possible_transfer_fee_flow': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Possible Transfer-Fee Flow — ${tokenId}`,
+        body:
+          `${amtStr} token movement is consistent with transfer-fee behavior. ` +
+          `Registry confirmed fee: ${sig.has_transfer_fee ? 'yes' : 'no'}. ` +
+          `This is a structural on-chain delta signal, not full semantic confirmation. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'privacy_adjacent_token_activity': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Privacy-Adjacent Token Activity — ${tokenId}`,
+        body:
+          `${amtStr} moved through privacy-adjacent Token-2022 architecture. ` +
+          `Confidential transfer: ${sig.has_confidential_transfer ? 'present' : 'not detected'}. ` +
+          `Auditor key: ${sig.has_auditor_key ? 'present' : 'not detected'}. ` +
+          `Interpretation remains structural and does not imply visibility into hidden amounts. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
     case 'shadow_family_fan_out': {
       const members  = sig.shadow_family_total_members ?? '?';
       const familyEx = sig.shadow_family_source_exchange ?? exch;
@@ -410,6 +555,19 @@ export function evaluateSignalsForAlerts(
 
     const intel_score = scoreSignal(sig);
     if (intel_score < minIntelScore) continue;
+
+    // Block 29 — extra promotion gates for token-aware archetypes
+    if (
+      (archetype === 'token2022_extension_sensitive' && intel_score < MIN_EXTENSION_SENSITIVE_INTEL_SCORE) ||
+      (
+        (archetype === 'asymmetric_token_delta' ||
+         archetype === 'possible_transfer_fee_flow' ||
+         archetype === 'privacy_adjacent_token_activity') &&
+        intel_score < MIN_TOKEN_AWARE_INTEL_SCORE
+      )
+    ) {
+      continue;
+    }
 
     const consolidation_key = toConsolidationKey(archetype, sig);
     if (recentKeys.has(consolidation_key)) continue;
@@ -500,6 +658,10 @@ export function decisionToAlertInsert(decision: SovereignAlertDecision): AlertIn
     sovereign_high_confidence: 'sovereign_high_confidence',
     shadow_family_fan_out:     'shadow_family_fan_out',
     shadow_gas_funding_chain:  'shadow_gas_funding_chain',
+    token2022_extension_sensitive: 'token2022_extension_sensitive',
+    asymmetric_token_delta:        'asymmetric_token_delta',
+    possible_transfer_fee_flow:    'possible_transfer_fee_flow',
+    privacy_adjacent_token_activity: 'privacy_adjacent_token_activity',
   };
 
   return {
