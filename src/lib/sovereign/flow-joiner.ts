@@ -37,7 +37,7 @@
 // When no shadow link is available, returns clean null/false values.
 // ============================================================
 
-import type { NormalizedOutput } from '@/lib/normalizer';
+import type { NormalizedOutput, TokenDeltaAnalysis } from '@/lib/normalizer';
 import type { MovementRow, TokenMovementRow } from '@/lib/supabase/types';
 import type { SovereignTokenRegistry }         from './token-registry';
 import type { ResolvedEntity }                 from '@/lib/entity-graph/index';
@@ -248,6 +248,11 @@ export interface EnrichedSovereignSignal {
   // null family_id = no family membership detected — always present, never missing
   shadow_family_context: ShadowFamilyContext;
 
+  // ── Token delta analysis (Block 28)
+  // null = no token movement decoded, or Helius path (sovereign_rpc only).
+  // Carries first-class token_program_type, asymmetry detection, and Token-2022 flags.
+  token_delta_analysis: TokenDeltaAnalysis | null;
+
   // ── Signal confidence (Source of Truth §16)
   signal_confidence:   ConfidenceTier;
   signal_score:        number;           // 0-100 composite
@@ -330,8 +335,9 @@ function buildTokenContext(
 // ── Pure helper: token security posture ──────────────────────
 
 function buildTokenSecurityPosture(
-  mint:     string | null,
-  registry: SovereignTokenRegistry,
+  mint:          string | null,
+  registry:      SovereignTokenRegistry,
+  deltaAnalysis: TokenDeltaAnalysis | null = null,
 ): TokenSecurityPosture {
   if (!mint) {
     return {
@@ -352,17 +358,29 @@ function buildTokenSecurityPosture(
   const entry = registry.get(mint);
 
   if (!entry) {
+    // Even with no registry entry, delta analysis may have detected Token-2022 on-chain
+    const detectedProgram = deltaAnalysis?.token_program_type ?? 'unknown';
+    const detectedIs2022  = detectedProgram === 'token_2022';
+    const fogNotes = ['Token architecture unknown — sovereign inspection pending'];
+    if (detectedIs2022) {
+      fogNotes.push('Token-2022 program detected via on-chain balance entry (not yet enriched)');
+    }
+    if (deltaAnalysis) {
+      for (const note of deltaAnalysis.evidence) fogNotes.push(note);
+    }
     return {
-      token_program_type:        'unknown',
-      is_token_2022:             false,
+      token_program_type:        detectedProgram,
+      is_token_2022:             detectedIs2022,
       has_transfer_fee:          false,
       has_confidential_transfer: false,
       has_transfer_hook:         false,
       has_permanent_delegate:    false,
       has_auditor_key:           false,
-      risk_flags:                [],
-      security_summary:          'Unknown token — not yet enriched by Mint Enricher',
-      fog_piercing_notes:        ['Token architecture unknown — sovereign inspection pending'],
+      risk_flags:                deltaAnalysis?.possible_transfer_fee ? ['possible_transfer_fee'] : [],
+      security_summary:          detectedIs2022
+        ? 'Token-2022 program (on-chain) — not yet enriched by Mint Enricher'
+        : 'Unknown token — not yet enriched by Mint Enricher',
+      fog_piercing_notes:        fogNotes,
       confidence:                'low',
     };
   }
@@ -396,26 +414,58 @@ function buildTokenSecurityPosture(
       'Transfer fee applies: receiver nets less than sender sends — delta asymmetry expected',
     );
   }
-  if (is_token_2022 && fog_piercing_notes.length === 0) {
+  // ── 28C: Supplement from delta analysis ──────────────────────
+  // Delta analysis carries on-chain detected token_program_type (from balance
+  // entry programId), which may be more current than registry for new mints.
+  // Upgrade unknown → detected without downgrading a confirmed registry value.
+  let effectiveProgramType = entry.token_program;
+  if (effectiveProgramType === 'unknown' && deltaAnalysis?.token_program_type !== 'unknown') {
+    effectiveProgramType = deltaAnalysis!.token_program_type;
+  }
+  const effectiveIsToken2022 = effectiveProgramType === 'token_2022' || is_token_2022;
+
+  if (effectiveIsToken2022 && !is_token_2022) {
+    // On-chain detection upgraded program type — note it
+    fog_piercing_notes.push(
+      'Token-2022 program detected via on-chain balance entry programId (registry not yet enriched)',
+    );
+  } else if (is_token_2022 && fog_piercing_notes.length === 0) {
     fog_piercing_notes.push(
       'Token-2022 program confirmed — extension details not yet enriched by Mint Enricher',
     );
   }
 
-  // Security summary
+  // Delta analysis fog-piercing notes (asymmetry, fee-sink, multi-leg)
+  if (deltaAnalysis) {
+    for (const note of deltaAnalysis.evidence) {
+      if (!fog_piercing_notes.includes(note)) fog_piercing_notes.push(note);
+    }
+    if (deltaAnalysis.possible_transfer_fee && !entry.has_transfer_fee) {
+      // On-chain delta suggests fee behavior but registry doesn't confirm it yet
+      if (!risk_flags.includes('possible_transfer_fee')) {
+        risk_flags.push('possible_transfer_fee');
+      }
+    }
+    if (deltaAnalysis.delta_pattern === 'multi_leg') {
+      if (!risk_flags.includes('multi_leg_token_movement')) {
+        risk_flags.push('multi_leg_token_movement');
+      }
+    }
+  }
+
+  // Security summary — uses effective program type
   let security_summary: string;
-  if (!is_token_2022) {
-    security_summary = entry.token_program === 'spl_token'
+  if (!effectiveIsToken2022) {
+    security_summary = effectiveProgramType === 'spl_token'
       ? 'Legacy SPL token — standard transfer semantics'
       : 'Legacy SPL token — program type unconfirmed';
   } else if (entry.has_confidential_transfer && entry.has_auditor_key) {
     security_summary = 'Token-2022 privacy token with auditor key — shielded amounts, institutional oversight';
   } else if (entry.has_confidential_transfer) {
     security_summary = 'Token-2022 privacy token — confidential transfer architecture, amounts may be hidden';
-  } else if (entry.has_transfer_fee) {
-    const bps = risk_flags.includes('transfer_fee') ? '' : '';
-    void bps; // suppress unused
-    security_summary = 'Token-2022 with transfer fee — asymmetric sender/receiver deltas';
+  } else if (entry.has_transfer_fee || deltaAnalysis?.possible_transfer_fee) {
+    const confirmed = entry.has_transfer_fee ? 'confirmed' : 'possible (on-chain delta signal)';
+    security_summary = `Token-2022 with transfer fee (${confirmed}) — asymmetric sender/receiver deltas`;
   } else if (entry.has_transfer_hook) {
     security_summary = 'Token-2022 with transfer hook — custom program logic on transfer';
   } else if (entry.has_permanent_delegate) {
@@ -426,17 +476,17 @@ function buildTokenSecurityPosture(
 
   // Confidence: was the entry actually enriched by the Mint Enricher?
   const enrichmentConfidence: 'high' | 'medium' | 'low' =
-    (is_token_2022 && (entry.has_transfer_fee || entry.has_confidential_transfer ||
+    (effectiveIsToken2022 && (entry.has_transfer_fee || entry.has_confidential_transfer ||
      entry.has_transfer_hook || entry.has_permanent_delegate || entry.has_auditor_key ||
-     entry.token_program !== 'unknown'))
+     effectiveProgramType !== 'unknown'))
       ? 'high'
-      : entry.token_program !== 'unknown'
+      : effectiveProgramType !== 'unknown'
         ? 'medium'
         : 'low';
 
   return {
-    token_program_type:        entry.token_program,
-    is_token_2022,
+    token_program_type:        effectiveProgramType,
+    is_token_2022:             effectiveIsToken2022,
     has_transfer_fee:          entry.has_transfer_fee,
     has_confidential_transfer: entry.has_confidential_transfer,
     has_transfer_hook:         entry.has_transfer_hook,
@@ -709,9 +759,10 @@ export function joinSovereignFlow(
   const whaleAddr = normalized.whaleAddressHint         ?? null;
 
   // ── Token context ─────────────────────────────────────────────
-  const tokenMint    = normalized.tokenMovement?.token_mint ?? null;
-  const tokenContext = tokenMint ? buildTokenContext(tokenMint, registry) : null;
-  const tokenSecurity = buildTokenSecurityPosture(tokenMint, registry);
+  const tokenMint       = normalized.tokenMovement?.token_mint ?? null;
+  const tokenContext    = tokenMint ? buildTokenContext(tokenMint, registry) : null;
+  const tokenDeltaAnalysis = normalized.tokenDeltaAnalysis ?? null;
+  const tokenSecurity   = buildTokenSecurityPosture(tokenMint, registry, tokenDeltaAnalysis);
 
   // ── Entity attribution ────────────────────────────────────────
   const fromEntity  = buildEntityAttribution(fromAddr,  entityMap);
@@ -787,6 +838,7 @@ export function joinSovereignFlow(
     cluster_context:       clusterContext,
     shadow_context:        shadowContext,
     shadow_family_context: shadowFamilyContext,
+    token_delta_analysis:  tokenDeltaAnalysis,
     signal_confidence,
     signal_score:        score,
     evidence,

@@ -122,6 +122,7 @@ export class HeliusWebhookProcessor {
           tokenMovement:    null,
           whaleAddressHint: null,
           skipped:          true,
+          tokenDeltaAnalysis: null,
         };
       }
     });

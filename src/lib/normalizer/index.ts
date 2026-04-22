@@ -25,14 +25,19 @@ import {
   canDecode,
   type RawTxPayload,
 } from '@/lib/decoder';
-import { decodeSovereignMovement }      from '@/lib/decoder/sovereign';
-import { decodeSovereignTokenMovement } from '@/lib/decoder/sovereign-token';
+import { decodeSovereignMovement }                      from '@/lib/decoder/sovereign';
+import {
+  decodeSovereignTokenMovement,
+  analyzeSovereignTokenDelta,
+  type TokenDeltaAnalysis,
+} from '@/lib/decoder/sovereign-token';
 import type { MovementRow, TokenMovementRow } from '@/lib/supabase/types';
 import type { SovereignTokenRegistry }  from '@/lib/sovereign/token-registry';
 import { GLOBAL_MINT_ENRICHMENT_QUEUE } from '@/lib/sovereign/mint-enricher';
 // RawTxRow lives in the ingest layer — that is where raw_transactions is defined.
-export type { RawTxRow } from '@/lib/ingest/ingest-rpc';
-import type { RawTxRow } from '@/lib/ingest/ingest-rpc';
+export type { RawTxRow }              from '@/lib/ingest/ingest-rpc';
+export type { TokenDeltaAnalysis }    from '@/lib/decoder/sovereign-token';
+import type { RawTxRow }              from '@/lib/ingest/ingest-rpc';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -56,6 +61,12 @@ export interface NormalizedOutput {
   /** whale_address from the token movement decoder — not stored in DB, used for whale_id resolution */
   whaleAddressHint: string | null;
   skipped:          boolean;   // true if source is not decodable or payload malformed
+  /**
+   * Token delta analysis (Block 28 — sovereign_rpc path only).
+   * null = no token movement decoded, or Helius path (not analyzed).
+   * Carries token_program_type as a first-class field (not buried in protocol).
+   */
+  tokenDeltaAnalysis: TokenDeltaAnalysis | null;
 }
 
 // ── Normalize a single raw_transactions row ───────────────────
@@ -65,11 +76,12 @@ export function normalizeRawTx(
   ctx: NormalizationContext,
 ): NormalizedOutput {
   const base: NormalizedOutput = {
-    signature:        row.signature,
-    movement:         null,
-    tokenMovement:    null,
-    whaleAddressHint: null,
-    skipped:          false,
+    signature:          row.signature,
+    movement:           null,
+    tokenMovement:      null,
+    whaleAddressHint:   null,
+    skipped:            false,
+    tokenDeltaAnalysis: null,
   };
 
   if (!canDecode(row.source)) {
@@ -99,6 +111,15 @@ export function normalizeRawTx(
         const { whale_address: _wa, ...rest } = tm;
         void _wa;
         base.tokenMovement = rest as Omit<TokenMovementRow, 'id' | 'created_at'>;
+
+        // ── 28A/28B/28C: Token delta analysis (sovereign path only) ──
+        // Produces token_program_type (first-class), asymmetry detection,
+        // and Token-2022 intelligence flags for the joiner.
+        if (tm.token_mint) {
+          base.tokenDeltaAnalysis = analyzeSovereignTokenDelta(
+            row.raw_json, tm.token_mint, ctx.whaleAddressSet, ctx.tokenRegistry,
+          );
+        }
       }
     } catch { /* malformed payload — skip token movement */ }
 

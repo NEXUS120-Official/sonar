@@ -359,6 +359,10 @@ export interface SovereignSignalRow {
   shadow_source_exchange: string | null;
   shadow_confidence:      number | null;
   shadow_linkage_reason:  string | null;
+  // ── Token delta analysis (Block 28) ──────────────────────────
+  token_delta_pattern:            string | null;   // symmetric_transfer | asymmetric_transfer | fee_sink_visible | multi_leg | unknown
+  has_asymmetric_token_delta:     boolean;
+  possible_transfer_fee_behavior: boolean;
   // ── Shadow family / multi-hop lineage (Block 26) ──────────────
   shadow_family_id:                     string | null;
   shadow_family_root_wallet:            string | null;

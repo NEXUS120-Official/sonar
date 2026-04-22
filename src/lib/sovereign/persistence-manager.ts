@@ -117,6 +117,13 @@ export interface PersistableSovereignSignal {
   shadow_family_has_fan_in:             boolean;
   shadow_family_has_temporal_correlation: boolean;
 
+  // ── Token delta analysis (Block 28)
+  // null = no token movement in this signal (SOL/USDC flow, or Helius path).
+  // When present: classifies the on-chain delta pattern and flags asymmetry / fee behavior.
+  token_delta_pattern:            string | null;  // TokenDeltaPattern | null
+  has_asymmetric_token_delta:     boolean;
+  possible_transfer_fee_behavior: boolean;
+
   // ── Signal quality (Source of Truth §16)
   signal_score:        number;
   signal_confidence:   string;    // ConfidenceTier
@@ -221,6 +228,10 @@ export function convertSignalToPayload(
     shadow_source_exchange: signal.shadow_context.source_exchange,
     shadow_confidence:      signal.shadow_context.exchange_origin_confidence,
     shadow_linkage_reason:  signal.shadow_context.linkage_reason,
+
+    token_delta_pattern:            signal.token_delta_analysis?.delta_pattern      ?? null,
+    has_asymmetric_token_delta:     signal.token_delta_analysis?.has_asymmetric_delta ?? false,
+    possible_transfer_fee_behavior: signal.token_delta_analysis?.possible_transfer_fee ?? false,
 
     shadow_family_id:                     signal.shadow_family_context.family_id,
     shadow_family_root_wallet:            signal.shadow_family_context.root_wallet,

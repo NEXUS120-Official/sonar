@@ -137,6 +137,7 @@ function movementRowToNormalizedOutput(row: MovementRow): NormalizedOutput {
     tokenMovement:    null,
     whaleAddressHint: null,
     skipped:          false,
+    tokenDeltaAnalysis: null,
   };
 }
 
