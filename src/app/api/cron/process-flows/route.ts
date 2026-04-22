@@ -424,6 +424,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           'shadow_family_fan_out', 'shadow_gas_funding_chain',
           'token2022_extension_sensitive', 'asymmetric_token_delta',
           'possible_transfer_fee_flow', 'privacy_adjacent_token_activity',
+          'privacy_bridgehead_birth', 'exchange_funded_privacy_staging',
+          'family_privacy_bridgehead',
         ];
         const sovereignCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
         const { data: recentSovereignRaw } = await db
@@ -460,15 +462,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             d.archetype === 'privacy_adjacent_token_activity'
           );
 
+          const bridgeheadAlerts = decisions.filter(d =>
+            d.archetype === 'privacy_bridgehead_birth' ||
+            d.archetype === 'exchange_funded_privacy_staging' ||
+            d.archetype === 'family_privacy_bridgehead'
+          );
+
           const asymmetricCount = buffer.filter(s => s.has_asymmetric_token_delta).length;
           const feeLikeCount    = buffer.filter(s => s.possible_transfer_fee_behavior).length;
           const privacyAdjCount = buffer.filter(s => s.is_token_2022 && (s.has_confidential_transfer || s.has_auditor_key)).length;
+          const familyPrivacyCount = buffer.filter(s => s.shadow_family_has_privacy_activation).length;
 
           log(
             'info',
             `Token-aware summary: ${tokenAwareSignals}/${buffer.length} token-aware signals, ` +
             `${tokenAwareAlerts.length} token-aware alert(s), ` +
-            `${asymmetricCount} asymmetric-delta, ${feeLikeCount} possible-fee, ${privacyAdjCount} privacy-adjacent`,
+            `${bridgeheadAlerts.length} privacy-bridgehead alert(s), ` +
+            `${asymmetricCount} asymmetric-delta, ${feeLikeCount} possible-fee, ` +
+            `${privacyAdjCount} privacy-adjacent, ${familyPrivacyCount} family-privacy`,
           );
         }
 

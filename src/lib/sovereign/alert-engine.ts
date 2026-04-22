@@ -47,7 +47,10 @@ export type AlertArchetype =
   | 'token2022_extension_sensitive'
   | 'asymmetric_token_delta'
   | 'possible_transfer_fee_flow'
-  | 'privacy_adjacent_token_activity';
+  | 'privacy_adjacent_token_activity'
+  | 'privacy_bridgehead_birth'
+  | 'exchange_funded_privacy_staging'
+  | 'family_privacy_bridgehead';
 
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -133,6 +136,21 @@ const MIN_PRIVACY_ADJACENT_USD            = 10_000;
 const MIN_TOKEN_AWARE_INTEL_SCORE         = 30;
 const MIN_EXTENSION_SENSITIVE_INTEL_SCORE = 35;
 
+// ── Privacy bridgehead thresholds (Block 30) ──────────────────
+// Conservative: only promote when multiple structural signals align.
+
+const PRIVACY_BRIDGEHEAD_BONUS       = 12;
+const PRIVACY_STAGING_BONUS          = 10;
+const FAMILY_PRIVACY_BRIDGE_BONUS    = 12;
+
+const MIN_PRIVACY_BRIDGEHEAD_USD     = 10_000;
+const MIN_PRIVACY_STAGING_USD        = 10_000;
+const MIN_FAMILY_PRIVACY_BRIDGE_USD  = 10_000;
+
+const MIN_PRIVACY_BRIDGEHEAD_INTEL   = 40;
+const MIN_PRIVACY_STAGING_INTEL      = 35;
+const MIN_FAMILY_PRIVACY_BRIDGE_INTEL = 40;
+
 // ── Helpers ───────────────────────────────────────────────────
 
 function formatUsd(n: number): string {
@@ -203,6 +221,35 @@ function scoreSignal(sig: PersistableSovereignSignal): number {
     score += PRIVACY_ADJACENT_BONUS;
   }
 
+  // Block 30 — privacy bridgehead bonuses (conservative)
+  if (
+    sig.has_shadow_link &&
+    sig.is_token_2022 &&
+    (sig.has_confidential_transfer || sig.has_auditor_key)
+  ) {
+    score += PRIVACY_BRIDGEHEAD_BONUS;
+  }
+
+  if (
+    sig.has_shadow_link &&
+    sig.is_token_2022 &&
+    (
+      sig.has_transfer_hook ||
+      sig.has_permanent_delegate ||
+      sig.has_transfer_fee ||
+      sig.possible_transfer_fee_behavior
+    )
+  ) {
+    score += PRIVACY_STAGING_BONUS;
+  }
+
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_privacy_activation
+  ) {
+    score += FAMILY_PRIVACY_BRIDGE_BONUS;
+  }
+
   return Math.min(100, score);
 }
 
@@ -220,6 +267,45 @@ function classifyArchetype(
     (sig.amount_usd ?? 0) >= minSignificantUsd
   ) return 'shadow_whale_inflow';
 
+  // cluster_synchronized_flow: cluster member + significant flow
+  if (sig.cluster_type && (sig.amount_usd ?? 0) >= minSignificantUsd) {
+    return 'cluster_synchronized_flow';
+  }
+
+  // privacy_bridgehead_birth: shadow-linked Token-2022 wallet enters privacy-adjacent posture
+  if (
+    sig.has_shadow_link &&
+    sig.is_token_2022 &&
+    (sig.amount_usd ?? 0) >= MIN_PRIVACY_BRIDGEHEAD_USD &&
+    (sig.has_confidential_transfer || sig.has_auditor_key)
+  ) {
+    return 'privacy_bridgehead_birth';
+  }
+
+  // exchange_funded_privacy_staging: exchange-linked Token-2022 wallet shows extension-sensitive staging posture
+  if (
+    sig.has_shadow_link &&
+    sig.is_token_2022 &&
+    (sig.amount_usd ?? 0) >= MIN_PRIVACY_STAGING_USD &&
+    (
+      sig.has_transfer_hook ||
+      sig.has_permanent_delegate ||
+      sig.has_transfer_fee ||
+      sig.possible_transfer_fee_behavior
+    )
+  ) {
+    return 'exchange_funded_privacy_staging';
+  }
+
+  // family_privacy_bridgehead: shadow family privacy activation becomes operationally visible
+  if (
+    sig.shadow_family_id !== null &&
+    sig.shadow_family_has_privacy_activation &&
+    (sig.amount_usd ?? 0) >= MIN_FAMILY_PRIVACY_BRIDGE_USD
+  ) {
+    return 'family_privacy_bridgehead';
+  }
+
   // exchange_shadow_birth: shadow link + privacy architecture activated
   if (sig.has_shadow_link && sig.has_confidential_transfer) {
     return 'exchange_shadow_birth';
@@ -228,11 +314,6 @@ function classifyArchetype(
   // privacy_token_activity: Token-2022 with confidential transfer or auditor key
   if (sig.has_confidential_transfer || (sig.is_token_2022 && sig.has_auditor_key)) {
     return 'privacy_token_activity';
-  }
-
-  // cluster_synchronized_flow: cluster member + significant flow
-  if (sig.cluster_type && (sig.amount_usd ?? 0) >= minSignificantUsd) {
-    return 'cluster_synchronized_flow';
   }
 
   // token2022_extension_sensitive: Token-2022 with meaningful extension-sensitive posture
@@ -332,6 +413,11 @@ function toConsolidationKey(archetype: AlertArchetype, sig: PersistableSovereign
     case 'possible_transfer_fee_flow':
     case 'privacy_adjacent_token_activity':
       return `${archetype}::${sig.token_mint ?? 'unknown'}`;
+    case 'privacy_bridgehead_birth':
+    case 'exchange_funded_privacy_staging':
+      return `${archetype}::${sig.shadow_source_exchange ?? 'unknown'}::${sig.token_mint ?? 'unknown'}`;
+    case 'family_privacy_bridgehead':
+      return `${archetype}::${sig.shadow_family_id ?? 'unknown'}`;
     case 'sovereign_high_confidence':
       return `${archetype}::${sig.signal_confidence}`;
   }
@@ -493,6 +579,53 @@ function buildAlertContent(
       };
     }
 
+    case 'privacy_bridgehead_birth': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Privacy Bridgehead Birth — ${tokenId}`,
+        body:
+          `${amtStr} moved through a shadow-linked Token-2022 wallet that entered privacy-adjacent posture. ` +
+          `Shadow source: ${sig.shadow_source_exchange ?? exch}. ` +
+          `Confidential transfer: ${sig.has_confidential_transfer ? 'present' : 'not detected'}. ` +
+          `Auditor key: ${sig.has_auditor_key ? 'present' : 'not detected'}. ` +
+          `Interpretation is structural and marks a likely privacy bridgehead, not hidden-amount visibility. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'exchange_funded_privacy_staging': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      return {
+        title: `Exchange-Funded Privacy Staging — ${tokenId}`,
+        body:
+          `${amtStr} moved through an exchange-linked Token-2022 wallet with extension-sensitive staging posture. ` +
+          `Shadow source: ${sig.shadow_source_exchange ?? exch}. ` +
+          `Signals: ${[
+            sig.has_transfer_hook ? 'transfer hook' : null,
+            sig.has_permanent_delegate ? 'permanent delegate' : null,
+            sig.has_transfer_fee ? 'confirmed transfer fee' : null,
+            sig.possible_transfer_fee_behavior ? 'possible transfer-fee behavior' : null,
+          ].filter(Boolean).join(', ') || 'extension-sensitive posture'}. ` +
+          `Interpretation remains structural and staging-oriented. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
+    case 'family_privacy_bridgehead': {
+      const tokenId = sig.token_symbol ?? (sig.token_mint ? sig.token_mint.slice(0, 8) + '…' : 'unknown token');
+      const familyEx = sig.shadow_family_source_exchange ?? exch;
+      return {
+        title: `Family Privacy Bridgehead — ${tokenId}`,
+        body:
+          `${amtStr} moved through a shadow family with observed privacy activation. ` +
+          `Family source: ${familyEx}. ` +
+          `Family size: ${sig.shadow_family_total_members ?? '?'}. ` +
+          `Hop depth: ${sig.shadow_family_hop_depth ?? 1}. ` +
+          `This indicates structural bridgehead behavior at family level, not direct visibility into private amounts. ` +
+          `Fog-piercing: ${sig.fog_piercing_notes.slice(0, 2).join('; ') || ev3}.`,
+      };
+    }
+
     case 'shadow_family_fan_out': {
       const members  = sig.shadow_family_total_members ?? '?';
       const familyEx = sig.shadow_family_source_exchange ?? exch;
@@ -565,6 +698,15 @@ export function evaluateSignalsForAlerts(
          archetype === 'privacy_adjacent_token_activity') &&
         intel_score < MIN_TOKEN_AWARE_INTEL_SCORE
       )
+    ) {
+      continue;
+    }
+
+    // Block 30 — privacy bridgehead promotion gates
+    if (
+      (archetype === 'privacy_bridgehead_birth' && intel_score < MIN_PRIVACY_BRIDGEHEAD_INTEL) ||
+      (archetype === 'exchange_funded_privacy_staging' && intel_score < MIN_PRIVACY_STAGING_INTEL) ||
+      (archetype === 'family_privacy_bridgehead' && intel_score < MIN_FAMILY_PRIVACY_BRIDGE_INTEL)
     ) {
       continue;
     }
@@ -662,6 +804,9 @@ export function decisionToAlertInsert(decision: SovereignAlertDecision): AlertIn
     asymmetric_token_delta:        'asymmetric_token_delta',
     possible_transfer_fee_flow:    'possible_transfer_fee_flow',
     privacy_adjacent_token_activity: 'privacy_adjacent_token_activity',
+    privacy_bridgehead_birth:        'privacy_bridgehead_birth',
+    exchange_funded_privacy_staging: 'exchange_funded_privacy_staging',
+    family_privacy_bridgehead:       'family_privacy_bridgehead',
   };
 
   return {

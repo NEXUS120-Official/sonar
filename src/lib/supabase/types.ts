@@ -47,7 +47,10 @@ export type AlertType =
   | 'token2022_extension_sensitive'     // Token-2022 extension-sensitive posture
   | 'asymmetric_token_delta'            // structural sender/receiver token asymmetry
   | 'possible_transfer_fee_flow'        // delta pattern consistent with fee-on-transfer behavior
-  | 'privacy_adjacent_token_activity';  // privacy-adjacent Token-2022 architecture
+  | 'privacy_adjacent_token_activity'   // privacy-adjacent Token-2022 architecture
+  | 'privacy_bridgehead_birth'          // shadow-linked Token-2022 wallet enters privacy-adjacent posture
+  | 'exchange_funded_privacy_staging'   // exchange-linked Token-2022 extension-sensitive staging
+  | 'family_privacy_bridgehead';        // family-level privacy activation becomes operationally visible
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 

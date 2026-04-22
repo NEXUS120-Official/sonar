@@ -66,6 +66,10 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   asymmetric_token_delta:         '⚖️ Asymmetric Token Delta',
   possible_transfer_fee_flow:     '💸 Possible Transfer-Fee Flow',
   privacy_adjacent_token_activity:'🫥 Privacy-Adjacent Token Activity',
+  // ── Privacy bridgehead archetypes (Block 30) ─────────────────
+  privacy_bridgehead_birth:       '🌫️ Privacy Bridgehead Birth',
+  exchange_funded_privacy_staging:'🏦 Exchange-Funded Privacy Staging',
+  family_privacy_bridgehead:      '🕸️ Family Privacy Bridgehead',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────
