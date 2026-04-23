@@ -8,12 +8,12 @@
 // ============================================================
 
 import { txToRawRow, type RawTxPayload } from '@/lib/decoder';
+import type { RawTxRow } from '@/lib/ingest/ingest-rpc';
 import {
   normalizeRawTx,
   type NormalizationContext,
   type NormalizedOutput,
 } from '@/lib/normalizer';
-import type { RawTxRow } from '@/lib/ingest/ingest-rpc';
 import type { SovereignIngestEnvelope } from './ingest-envelope';
 
 function toRawTxRow(envelope: SovereignIngestEnvelope): RawTxRow {
@@ -37,6 +37,6 @@ export function normalizeIngestEnvelopeBatch(
   ctx: NormalizationContext,
 ): NormalizedOutput[] {
   return envelopes
-    .map(env => normalizeIngestEnvelope(env, ctx))
-    .filter(out => !out.skipped && (out.movement !== null || out.tokenMovement !== null));
+    .map((env) => normalizeIngestEnvelope(env, ctx))
+    .filter((out) => !out.skipped && (out.movement !== null || out.tokenMovement !== null));
 }
