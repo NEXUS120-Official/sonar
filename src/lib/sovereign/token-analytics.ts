@@ -635,3 +635,188 @@ export async function getRecentPrivacyLifecycleSequenceStats(
   };
 }
 
+
+export interface PrivacyLifecycleEventStageStats {
+  by_stage: Array<{ stage: string; count: number }>;
+  public_side_count: number;
+  total_events: number;
+}
+
+export async function getRecentPrivacyLifecycleEventStageStats(
+  db: Db,
+  hours: number = 24 * 7,
+): Promise<PrivacyLifecycleEventStageStats> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    totalRes,
+    publicSideRes,
+    rowsRes,
+  ] = await Promise.all([
+    dba.from('privacy_lifecycle_events').select('*', { count: 'exact', head: true })
+      .gte('event_time', cutoff),
+    dba.from('privacy_lifecycle_events').select('*', { count: 'exact', head: true })
+      .gte('event_time', cutoff).eq('is_public_side', true),
+    dba.from('privacy_lifecycle_events')
+      .select('privacy_lifecycle_stage')
+      .gte('event_time', cutoff)
+      .limit(5000),
+  ]);
+
+  const counts = new Map<string, number>();
+  for (const row of (rowsRes.data ?? []) as Array<{ privacy_lifecycle_stage: string | null }>) {
+    const stage = row.privacy_lifecycle_stage ?? 'none';
+    counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+
+  return {
+    by_stage: [...counts.entries()]
+      .map(([stage, count]) => ({ stage, count }))
+      .sort((a, b) => b.count - a.count),
+    public_side_count: (publicSideRes.count as number | null) ?? 0,
+    total_events: (totalRes.count as number | null) ?? 0,
+  };
+}
+
+export interface PrivacyLifecycleEventTokenLeaderboardRow {
+  token_mint: string | null;
+  token_symbol: string | null;
+  event_count: number;
+  total_usd: number;
+}
+
+export async function getPrivacyLifecycleEventTokenLeaderboard(
+  db: Db,
+  hours: number = 24 * 7,
+  limit: number = 25,
+): Promise<PrivacyLifecycleEventTokenLeaderboardRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('privacy_lifecycle_events')
+    .select('token_mint, token_symbol, amount_usd')
+    .gte('event_time', cutoff)
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleEventTokenLeaderboardRow>();
+
+  for (const row of (data ?? []) as Array<{
+    token_mint: string | null;
+    token_symbol: string | null;
+    amount_usd: number | null;
+  }>) {
+    const key = row.token_mint ?? 'unknown';
+    const prev = agg.get(key);
+    if (prev) {
+      prev.event_count += 1;
+      prev.total_usd += row.amount_usd ?? 0;
+    } else {
+      agg.set(key, {
+        token_mint: row.token_mint,
+        token_symbol: row.token_symbol,
+        event_count: 1,
+        total_usd: row.amount_usd ?? 0,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.event_count - a.event_count) || (b.total_usd - a.total_usd))
+    .slice(0, limit);
+}
+
+export interface PrivacyLifecycleEventExchangeStatsRow {
+  source_exchange: string;
+  event_count: number;
+  public_side_count: number;
+}
+
+export async function getPrivacyLifecycleEventExchangeStats(
+  db: Db,
+  hours: number = 24 * 7,
+): Promise<PrivacyLifecycleEventExchangeStatsRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('privacy_lifecycle_events')
+    .select('shadow_source_exchange, is_public_side')
+    .gte('event_time', cutoff)
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleEventExchangeStatsRow>();
+
+  for (const row of (data ?? []) as Array<{
+    shadow_source_exchange: string | null;
+    is_public_side: boolean | null;
+  }>) {
+    const ex = row.shadow_source_exchange ?? 'unknown';
+    const prev = agg.get(ex);
+    if (prev) {
+      prev.event_count += 1;
+      prev.public_side_count += row.is_public_side ? 1 : 0;
+    } else {
+      agg.set(ex, {
+        source_exchange: ex,
+        event_count: 1,
+        public_side_count: row.is_public_side ? 1 : 0,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => b.event_count - a.event_count);
+}
+
+export interface PrivacyLifecycleEventFamilyLeaderboardRow {
+  shadow_family_id: string;
+  event_count: number;
+  total_usd: number;
+}
+
+export async function getPrivacyLifecycleEventFamilyLeaderboard(
+  db: Db,
+  hours: number = 24 * 7,
+  limit: number = 25,
+): Promise<PrivacyLifecycleEventFamilyLeaderboardRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('privacy_lifecycle_events')
+    .select('shadow_family_id, amount_usd')
+    .gte('event_time', cutoff)
+    .not('shadow_family_id', 'is', null)
+    .limit(5000);
+
+  const agg = new Map<string, PrivacyLifecycleEventFamilyLeaderboardRow>();
+
+  for (const row of (data ?? []) as Array<{
+    shadow_family_id: string | null;
+    amount_usd: number | null;
+  }>) {
+    if (!row.shadow_family_id) continue;
+    const prev = agg.get(row.shadow_family_id);
+    if (prev) {
+      prev.event_count += 1;
+      prev.total_usd += row.amount_usd ?? 0;
+    } else {
+      agg.set(row.shadow_family_id, {
+        shadow_family_id: row.shadow_family_id,
+        event_count: 1,
+        total_usd: row.amount_usd ?? 0,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.event_count - a.event_count) || (b.total_usd - a.total_usd))
+    .slice(0, limit);
+}
+
