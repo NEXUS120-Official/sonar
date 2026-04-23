@@ -48,6 +48,7 @@ import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/priva
 import { derivePrivacySequenceAlertCandidates } from '@/lib/sovereign/privacy-sequence-alerts';
 import { consolidatePrivacySequencePromotedAlerts } from '@/lib/sovereign/privacy-sequence-alert-consolidation';
 import { unifyPrivacyAlertDoctrine } from '@/lib/sovereign/privacy-alert-doctrine';
+import { suppressRecentDuplicatePrivacyAlerts } from '@/lib/sovereign/privacy-alert-history';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
@@ -517,21 +518,50 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                       const doctrineUnifiedAlerts =
                         unifyPrivacyAlertDoctrine(consolidatedPromotedAlerts);
 
-                      if (doctrineUnifiedAlerts.length > 0) {
+                      const recentPrivacyTypes = [
+                        'privacy_exit_to_public_flow',
+                        'post_privacy_downstream_move',
+                        'family_privacy_reemergence',
+                        'privacy_sequence_bridgehead_reemergence',
+                        'privacy_sequence_downstream_continuation',
+                        'privacy_sequence_family_reemergence',
+                      ];
+
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const { data: recentPrivacyAlerts } = await db
+                        .from('alerts')
+                        .select('alert_type, title, created_at, data')
+                        .in('alert_type', recentPrivacyTypes as any)
+                        .gte('created_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+                        .order('created_at', { ascending: false })
+                        .limit(200);
+
+                      const historyDedupedAlerts =
+                        suppressRecentDuplicatePrivacyAlerts(
+                          doctrineUnifiedAlerts,
+                          (recentPrivacyAlerts ?? []) as Array<{
+                            alert_type: string;
+                            title: string;
+                            created_at: string;
+                            data: Record<string, unknown> | null;
+                          }>
+                        );
+
+                      if (historyDedupedAlerts.length > 0) {
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const { data: insertedPromoted, error: promotedErr } = await db
                           .from('alerts')
-                          .insert(doctrineUnifiedAlerts as any)
+                          .insert(historyDedupedAlerts as any)
                           .select('id');
 
                         if (promotedErr) {
                           log('warn', `Privacy sequence promoted alert insert failed (non-critical): ${promotedErr.message}`);
                         } else {
                           alerts_generated += insertedPromoted?.length ?? 0;
-                          log('info', `Privacy sequence promoted alerts written: ${insertedPromoted?.length ?? 0} (from ${promotedAlerts.length} raw / ${consolidatedPromotedAlerts.length} consolidated / ${doctrineUnifiedAlerts.length} doctrine-unified)`);
+                          log('info', `Privacy sequence promoted alerts written: ${insertedPromoted?.length ?? 0} (from ${promotedAlerts.length} raw / ${consolidatedPromotedAlerts.length} consolidated / ${doctrineUnifiedAlerts.length} doctrine-unified / ${historyDedupedAlerts.length} history-deduped)`);
                         }
                       } else {
-                        log('info', 'Privacy sequence promoted alerts: no candidates above promotion threshold');
+                        log('info', 'Privacy sequence promoted alerts: no candidates remained after doctrine/history dedup');
                       }
                     }
                   } else {
