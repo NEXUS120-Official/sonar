@@ -59,3 +59,22 @@ export function normalizeWebhookEnvelopes(
     token_classified: normalized.filter((out) => out.tokenMovement !== null).length,
   };
 }
+
+
+export interface ProviderReplayReceipt {
+  normalized: NormalizedOutput[];
+  classified: number;
+  token_classified: number;
+}
+
+export function normalizeReplayEnvelopes(
+  envelopes: ReadonlyArray<SovereignIngestEnvelope>,
+  ctx: NormalizationContext,
+): ProviderReplayReceipt {
+  const receipt = normalizeWebhookEnvelopes(envelopes, ctx);
+  return {
+    normalized: receipt.normalized,
+    classified: receipt.classified,
+    token_classified: receipt.token_classified,
+  };
+}

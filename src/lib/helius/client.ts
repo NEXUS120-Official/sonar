@@ -1,3 +1,13 @@
+// LEGACY HISTORY NOTICE:
+// Any Helius transaction-history usage should now be treated as
+// legacy compatibility only.
+// Strategic direction:
+//   sovereign-history-runtime
+//   raw_transactions replay
+//   source-agnostic backfill paths
+//
+// Do not expand Helius-bound replay logic further.
+
 // ============================================================
 // SONAR — Helius API Client (Solana)
 // ============================================================
