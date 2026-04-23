@@ -816,3 +816,18 @@ export interface SovereignPriceEnrichmentQueueRow {
   last_error: string | null;
   created_at: string;
 }
+
+
+export interface SovereignValuationDoctrinePreviewRow {
+  asset_key: string;
+  price_usd: number | null;
+  effective_price_usd: number | null;
+  value_usd: number | null;
+  price_confidence: string;
+  effective_confidence: string;
+  valuation_reason: string;
+  last_price_at: string | null;
+  price_source_mode: string;
+  price_age_seconds: number | null;
+  is_stale_price: boolean;
+}

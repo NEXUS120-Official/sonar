@@ -9,12 +9,13 @@
 import type { createAdminClient } from '@/lib/supabase/server';
 
 type Db = ReturnType<typeof createAdminClient>;
+import { applyPriceDoctrine, type SovereignPriceConfidence } from './sovereign-price-doctrine';
 
 export interface SovereignPriceInspection {
   asset_key: string;
   symbol: string | null;
   price_usd: number | null;
-  price_confidence: 'high' | 'medium' | 'low' | 'unknown';
+  price_confidence: SovereignPriceConfidence;
   price_source_mode: 'sovereign_price_runtime_v1';
   valuation_reason: string | null;
   raw_snapshot: Record<string, unknown> | null;
@@ -25,7 +26,7 @@ export interface ValuationResult {
   amount: number | null;
   price_usd: number | null;
   value_usd: number | null;
-  price_confidence: 'high' | 'medium' | 'low' | 'unknown';
+  price_confidence: SovereignPriceConfidence;
   valuation_reason: string;
   last_price_at: string | null;
   price_source_mode: string;
@@ -161,7 +162,7 @@ export async function loadLatestPriceRow(
 ): Promise<{
   asset_key: string;
   price_usd: number | null;
-  price_confidence: 'high' | 'medium' | 'low' | 'unknown';
+  price_confidence: SovereignPriceConfidence;
   valuation_reason: string | null;
   last_price_at: string;
   price_source_mode: string;
@@ -186,27 +187,13 @@ export async function deriveUsdValue(
 ): Promise<ValuationResult> {
   const priceRow = await loadLatestPriceRow(db, assetKey);
 
-  if (!priceRow || amount === null || priceRow.price_usd === null) {
-    return {
-      asset_key: assetKey,
-      amount,
-      price_usd: priceRow?.price_usd ?? null,
-      value_usd: null,
-      price_confidence: priceRow?.price_confidence ?? 'unknown',
-      valuation_reason: priceRow?.valuation_reason ?? 'missing sovereign price context',
-      last_price_at: priceRow?.last_price_at ?? null,
-      price_source_mode: priceRow?.price_source_mode ?? 'sovereign_price_runtime_v1',
-    };
-  }
-
-  return {
+  return applyPriceDoctrine({
     asset_key: assetKey,
     amount,
-    price_usd: priceRow.price_usd,
-    value_usd: amount * priceRow.price_usd,
-    price_confidence: priceRow.price_confidence,
-    valuation_reason: priceRow.valuation_reason ?? 'derived from sovereign price registry',
-    last_price_at: priceRow.last_price_at,
-    price_source_mode: priceRow.price_source_mode,
-  };
+    price_usd: priceRow?.price_usd ?? null,
+    price_confidence: priceRow?.price_confidence ?? 'unknown',
+    valuation_reason: priceRow?.valuation_reason ?? 'missing sovereign price context',
+    last_price_at: priceRow?.last_price_at ?? null,
+    price_source_mode: priceRow?.price_source_mode ?? 'sovereign_price_runtime_v1',
+  });
 }
