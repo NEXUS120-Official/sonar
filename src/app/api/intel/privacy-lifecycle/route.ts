@@ -17,13 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import {
-  getRecentPrivacyLifecycleEventStageStats,
-  getPrivacyLifecycleEventTokenLeaderboard,
-  getPrivacyLifecycleEventExchangeStats,
-  getPrivacyLifecycleEventFamilyLeaderboard,
-  getRecentPrivacyLifecycleSequenceStats,
-} from '@/lib/sovereign/token-analytics';
+import { buildPrivacyLifecycleOverview } from '@/lib/sovereign/privacy-lifecycle-overview';
 
 function parsePositiveInt(value: string | null, fallback: number): number {
   if (!value) return fallback;
@@ -39,30 +33,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limit = parsePositiveInt(searchParams.get('limit'), 25);
 
   try {
-    const [
-      event_stage_stats,
-      event_token_leaderboard,
-      event_exchange_stats,
-      event_family_leaderboard,
-      sequence_stats,
-    ] = await Promise.all([
-      getRecentPrivacyLifecycleEventStageStats(db, hours),
-      getPrivacyLifecycleEventTokenLeaderboard(db, hours, limit),
-      getPrivacyLifecycleEventExchangeStats(db, hours),
-      getPrivacyLifecycleEventFamilyLeaderboard(db, hours, limit),
-      getRecentPrivacyLifecycleSequenceStats(db, hours),
-    ]);
+    const overview = await buildPrivacyLifecycleOverview(db, hours, limit);
 
     return NextResponse.json({
       ok: true,
-      hours,
-      limit,
-      event_stage_stats,
-      event_token_leaderboard,
-      event_exchange_stats,
-      event_family_leaderboard,
-      sequence_stats,
-      generated_at: new Date().toISOString(),
+      ...overview,
     });
   } catch (err) {
     return NextResponse.json(
