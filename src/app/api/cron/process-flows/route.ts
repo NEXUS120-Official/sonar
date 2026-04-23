@@ -45,6 +45,7 @@ import {
 import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
+import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
 // ── Logging ───────────────────────────────────────────────────
 
@@ -388,8 +389,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (significantRows.length > 0) {
       const replayEnvelopes = significantRows.map(movementRowToReplayEnvelope);
-      void replayEnvelopes;
-      const normalized = significantRows.map(movementRowToNormalizedOutput);
+      const replayResult = normalizeReplayRowsWithFallback(
+        significantRows,
+        replayEnvelopes,
+        {
+          whaleAddressSet: new Set<string>(),
+          solPriceUsd: 0,
+        },
+      );
+      const normalized = replayResult.normalized;
+
+      log(
+        'info',
+        `Replay normalization: ${replayResult.used_provider_path} provider-path, ` +
+        `${replayResult.used_fallback_path} fallback-path`,
+      );
 
       // Collect unique addresses for shadow map lookup
       const addrSet = new Set<string>();
