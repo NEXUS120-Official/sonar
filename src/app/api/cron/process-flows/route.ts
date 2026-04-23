@@ -41,11 +41,11 @@ import {
   evaluateSignalsForAlerts,
   consolidateAlerts,
   decisionToAlertInsert,
+  deriveSequenceAwareAlertInserts,
 }                                            from '@/lib/sovereign/alert-engine';
 import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
 import { derivePrivacySequenceAlertCandidates } from '@/lib/sovereign/privacy-sequence-alerts';
-import { promotePrivacySequenceCandidatesToAlerts } from '@/lib/sovereign/privacy-sequence-alert-promotion';
 import { consolidatePrivacySequencePromotedAlerts } from '@/lib/sovereign/privacy-sequence-alert-consolidation';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
@@ -502,7 +502,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                     } else {
                       log('info', `Privacy sequence alert candidates written: ${insertedCandidates?.length ?? 0}`);
 
-                      const promotedAlerts = promotePrivacySequenceCandidatesToAlerts(
+                      const promotedAlerts = deriveSequenceAwareAlertInserts(
                         sequenceCandidates.map((c) => ({
                           ...c,
                           created_at: new Date().toISOString(),
