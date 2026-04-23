@@ -2,6 +2,7 @@
 // Intel — Weekly Report + Flow Heatmap + Cohort deep-dive
 // ============================================================
 
+import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/server';
 import { WeeklyReport } from '@/components/WeeklyReport';
 import { FlowHeatmap } from '@/components/FlowHeatmap';
@@ -160,6 +161,32 @@ export default async function IntelPage() {
           Weekly summary · flow heatmap · whale cohort analysis
         </p>
       </div>
+
+      {/* Privacy Lifecycle entrypoint */}
+      <Link
+        href="/dashboard/privacy-lifecycle"
+        className="block rounded-xl border p-5 transition hover:opacity-90"
+        style={{ background: '#12121a', borderColor: '#1e1e2e' }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p
+              className="text-xs uppercase tracking-widest mb-3"
+              style={{ color: '#6b6b80', fontFamily: 'var(--font-mono)' }}
+            >
+              New Intel Surface
+            </p>
+            <h2 className="text-lg font-semibold">Privacy Lifecycle</h2>
+            <p className="text-sm mt-2 max-w-3xl" style={{ color: '#6b6b80' }}>
+              Event stages, re-emergence sequences, exchange-origin context, and
+              family-level privacy flow intelligence.
+            </p>
+          </div>
+          <div className="text-sm font-medium shrink-0" style={{ color: '#22d3ee' }}>
+            Open dashboard →
+          </div>
+        </div>
+      </Link>
 
       {/* Weekly Report + Cohort side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
