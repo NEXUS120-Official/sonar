@@ -762,3 +762,34 @@ export interface SovereignWhaleCandidateRow {
   linkage_reason: string;
   methodology_version: string;
 }
+
+
+export interface SovereignMintRegistryRow {
+  mint: string;
+  symbol: string | null;
+  name: string | null;
+  decimals: number | null;
+  token_program: string;
+  is_token_2022: boolean;
+  has_transfer_fee: boolean;
+  has_transfer_hook: boolean;
+  has_confidential_transfer: boolean;
+  has_auditor_key: boolean;
+  has_freeze_authority: boolean;
+  metadata_source_mode: string;
+  enrichment_confidence: string;
+  risk_flags: string[];
+  raw_snapshot: Record<string, unknown> | null;
+  last_enriched_at: string;
+  created_at: string;
+}
+
+export interface SovereignMintEnrichmentQueueRow {
+  mint: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  sighting_count: number;
+  status: string;
+  last_error: string | null;
+  created_at: string;
+}

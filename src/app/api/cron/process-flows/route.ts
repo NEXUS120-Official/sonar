@@ -57,6 +57,7 @@ import {
 import { insertPrivacySuppressionReceipts } from '@/lib/sovereign/privacy-alert-suppression-receipts';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
+import { enqueueUnknownMint } from '@/lib/sovereign/sovereign-mint-enricher';
 
 // ── Logging ───────────────────────────────────────────────────
 
@@ -443,6 +444,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Evaluate in-memory buffer for intelligence-grade alerts
       if (joinResult.accepted > 0) {
         const buffer = manager.peekBuffer();
+
+        // ── Sovereign unknown mint queueing (Block 59) ─────────
+        {
+          const seenUnknownMints = new Set<string>();
+          for (const s of buffer) {
+            if (!s.token_mint) continue;
+            const unknownProgram = s.token_program_type === 'unknown';
+            const emptySymbol = !s.token_symbol;
+            if (!(unknownProgram || emptySymbol)) continue;
+            if (seenUnknownMints.has(s.token_mint)) continue;
+            seenUnknownMints.add(s.token_mint);
+            await enqueueUnknownMint(db, s.token_mint);
+          }
+        }
 
         // ── Privacy lifecycle event persistence (Block 36) ────────
         // Derived from the in-memory sovereign buffer BEFORE flush.
