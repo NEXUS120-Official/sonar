@@ -1,3 +1,9 @@
+// LEGACY BALANCE NOTICE:
+// This route remains for backward compatibility while SONAR
+// transitions from Helius balance inspection to sovereign
+// account-state runtime.
+// Strategic direction: /api/cron/update-sovereign-balances
+
 // ============================================================
 // SONAR v2.0 — Update Whale Balances Cron
 // POST /api/cron/update-balances

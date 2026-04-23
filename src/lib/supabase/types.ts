@@ -735,3 +735,16 @@ export interface PrivacyAlertSuppressionReceiptRow {
   methodology_version: string;
   created_at:          string;
 }
+
+
+export interface SovereignAccountStateSnapshotRow {
+  address: string;
+  sol_balance: number;
+  usdc_balance: number;
+  total_value_usd: number | null;
+  staked_sol: number;
+  staked_msol: number;
+  staked_jitosol: number;
+  fetched_at: string;
+  source_mode: string;
+}
