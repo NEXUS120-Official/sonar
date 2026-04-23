@@ -13,6 +13,9 @@ import {
   getPrivacyLifecycleEventExchangeStats,
   getPrivacyLifecycleEventFamilyLeaderboard,
   getRecentPrivacyLifecycleSequenceStats,
+  getRecentPrivacySequenceCandidateStats,
+  getPrivacySequenceCandidateLeaderboard,
+  getPrivacySequenceCandidateFamilyStats,
 } from '@/lib/sovereign/token-analytics';
 
 type Db = ReturnType<typeof createAdminClient>;
@@ -25,6 +28,9 @@ export interface PrivacyLifecycleOverview {
   event_exchange_stats: Awaited<ReturnType<typeof getPrivacyLifecycleEventExchangeStats>>;
   event_family_leaderboard: Awaited<ReturnType<typeof getPrivacyLifecycleEventFamilyLeaderboard>>;
   sequence_stats: Awaited<ReturnType<typeof getRecentPrivacyLifecycleSequenceStats>>;
+  candidate_stats: Awaited<ReturnType<typeof getRecentPrivacySequenceCandidateStats>>;
+  candidate_leaderboard: Awaited<ReturnType<typeof getPrivacySequenceCandidateLeaderboard>>;
+  candidate_family_stats: Awaited<ReturnType<typeof getPrivacySequenceCandidateFamilyStats>>;
   generated_at: string;
 }
 
@@ -39,12 +45,18 @@ export async function buildPrivacyLifecycleOverview(
     event_exchange_stats,
     event_family_leaderboard,
     sequence_stats,
+    candidate_stats,
+    candidate_leaderboard,
+    candidate_family_stats,
   ] = await Promise.all([
     getRecentPrivacyLifecycleEventStageStats(db, hours),
     getPrivacyLifecycleEventTokenLeaderboard(db, hours, limit),
     getPrivacyLifecycleEventExchangeStats(db, hours),
     getPrivacyLifecycleEventFamilyLeaderboard(db, hours, limit),
     getRecentPrivacyLifecycleSequenceStats(db, hours),
+    getRecentPrivacySequenceCandidateStats(db, hours),
+    getPrivacySequenceCandidateLeaderboard(db, hours, limit),
+    getPrivacySequenceCandidateFamilyStats(db, hours, limit),
   ]);
 
   return {
@@ -55,6 +67,9 @@ export async function buildPrivacyLifecycleOverview(
     event_exchange_stats,
     event_family_leaderboard,
     sequence_stats,
+    candidate_stats,
+    candidate_leaderboard,
+    candidate_family_stats,
     generated_at: new Date().toISOString(),
   };
 }

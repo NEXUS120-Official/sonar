@@ -820,3 +820,145 @@ export async function getPrivacyLifecycleEventFamilyLeaderboard(
     .slice(0, limit);
 }
 
+
+
+export interface PrivacySequenceCandidateStats {
+  by_type: Array<{ candidate_type: string; count: number }>;
+  by_priority: Array<{ candidate_priority: string; count: number }>;
+  high_confidence_count: number;
+  total_candidates: number;
+}
+
+export async function getRecentPrivacySequenceCandidateStats(
+  db: Db,
+  hours: number = 24 * 7,
+): Promise<PrivacySequenceCandidateStats> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const [
+    totalRes,
+    highConfRes,
+    rowsRes,
+  ] = await Promise.all([
+    dba.from('privacy_sequence_alert_candidates').select('*', { count: 'exact', head: true })
+      .gte('end_event_time', cutoff),
+    dba.from('privacy_sequence_alert_candidates').select('*', { count: 'exact', head: true })
+      .gte('end_event_time', cutoff).gte('candidate_confidence', 70),
+    dba.from('privacy_sequence_alert_candidates')
+      .select('candidate_type, candidate_priority')
+      .gte('end_event_time', cutoff)
+      .limit(5000),
+  ]);
+
+  const typeCounts = new Map<string, number>();
+  const priorityCounts = new Map<string, number>();
+
+  for (const row of (rowsRes.data ?? []) as Array<{
+    candidate_type: string | null;
+    candidate_priority: string | null;
+  }>) {
+    const t = row.candidate_type ?? 'unknown';
+    const p = row.candidate_priority ?? 'unknown';
+    typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1);
+    priorityCounts.set(p, (priorityCounts.get(p) ?? 0) + 1);
+  }
+
+  return {
+    by_type: [...typeCounts.entries()]
+      .map(([candidate_type, count]) => ({ candidate_type, count }))
+      .sort((a, b) => b.count - a.count),
+    by_priority: [...priorityCounts.entries()]
+      .map(([candidate_priority, count]) => ({ candidate_priority, count }))
+      .sort((a, b) => b.count - a.count),
+    high_confidence_count: (highConfRes.count as number | null) ?? 0,
+    total_candidates: (totalRes.count as number | null) ?? 0,
+  };
+}
+
+export interface PrivacySequenceCandidateLeaderboardRow {
+  candidate_id: string;
+  candidate_type: string;
+  candidate_priority: string;
+  candidate_confidence: number;
+  token_mint: string | null;
+  token_symbol: string | null;
+  shadow_family_id: string | null;
+  start_stage: string;
+  end_stage: string;
+  elapsed_seconds: number | null;
+  end_event_time: string;
+}
+
+export async function getPrivacySequenceCandidateLeaderboard(
+  db: Db,
+  hours: number = 24 * 7,
+  limit: number = 25,
+): Promise<PrivacySequenceCandidateLeaderboardRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('privacy_sequence_alert_candidates')
+    .select(
+      'candidate_id, candidate_type, candidate_priority, candidate_confidence, ' +
+      'token_mint, token_symbol, shadow_family_id, start_stage, end_stage, ' +
+      'elapsed_seconds, end_event_time'
+    )
+    .gte('end_event_time', cutoff)
+    .order('candidate_confidence', { ascending: false })
+    .order('end_event_time', { ascending: false })
+    .limit(limit);
+
+  return (data ?? []) as PrivacySequenceCandidateLeaderboardRow[];
+}
+
+export interface PrivacySequenceCandidateFamilyStatsRow {
+  shadow_family_id: string;
+  candidate_count: number;
+  max_confidence: number;
+}
+
+export async function getPrivacySequenceCandidateFamilyStats(
+  db: Db,
+  hours: number = 24 * 7,
+  limit: number = 25,
+): Promise<PrivacySequenceCandidateFamilyStatsRow[]> {
+  const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+
+  const { data } = await dba
+    .from('privacy_sequence_alert_candidates')
+    .select('shadow_family_id, candidate_confidence')
+    .gte('end_event_time', cutoff)
+    .not('shadow_family_id', 'is', null)
+    .limit(5000);
+
+  const agg = new Map<string, PrivacySequenceCandidateFamilyStatsRow>();
+
+  for (const row of (data ?? []) as Array<{
+    shadow_family_id: string | null;
+    candidate_confidence: number | null;
+  }>) {
+    if (!row.shadow_family_id) continue;
+    const prev = agg.get(row.shadow_family_id);
+    const conf = row.candidate_confidence ?? 0;
+    if (prev) {
+      prev.candidate_count += 1;
+      prev.max_confidence = Math.max(prev.max_confidence, conf);
+    } else {
+      agg.set(row.shadow_family_id, {
+        shadow_family_id: row.shadow_family_id,
+        candidate_count: 1,
+        max_confidence: conf,
+      });
+    }
+  }
+
+  return [...agg.values()]
+    .sort((a, b) => (b.candidate_count - a.candidate_count) || (b.max_confidence - a.max_confidence))
+    .slice(0, limit);
+}
