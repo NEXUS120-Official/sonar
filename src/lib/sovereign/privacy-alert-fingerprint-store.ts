@@ -7,6 +7,7 @@
 
 import type { createAdminClient } from '@/lib/supabase/server';
 import type { AlertInsert } from '@/lib/flow-engine/anomaly-detector';
+import { getPrivacyAlertCooldownPolicy } from './privacy-alert-cooldown-policy';
 
 type Db = ReturnType<typeof createAdminClient>;
 
@@ -76,40 +77,69 @@ export function buildPrivacyFingerprintRecord(alert: AlertInsert): PrivacyFinger
 
 export async function loadRecentPrivacyFingerprints(
   db: Db,
-  hours: number = 2,
-): Promise<Set<string>> {
+  hours: number = 24,
+): Promise<Array<{
+  fingerprint: string;
+  alert_family: string;
+  last_seen_at: string;
+}>> {
   const cutoff = new Date(Date.now() - hours * 3_600_000).toISOString();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (db as any)
     .from('privacy_alert_fingerprints')
-    .select('fingerprint')
+    .select('fingerprint, alert_family, last_seen_at')
     .gte('last_seen_at', cutoff)
-    .limit(500);
+    .limit(1000);
 
-  return new Set(
-    ((data ?? []) as Array<{ fingerprint: string }>).map((r) => r.fingerprint)
-  );
+  return (data ?? []) as Array<{
+    fingerprint: string;
+    alert_family: string;
+    last_seen_at: string;
+  }>;
 }
 
 export function suppressFingerprintKnownAlerts(
   alerts: ReadonlyArray<AlertInsert>,
-  knownFingerprints: ReadonlySet<string>,
+  knownRows: ReadonlyArray<{
+    fingerprint: string;
+    alert_family: string;
+    last_seen_at: string;
+  }>,
 ): {
   kept: AlertInsert[];
   suppressedFingerprints: string[];
 } {
   const kept: AlertInsert[] = [];
   const suppressedFingerprints: string[] = [];
-  const seen = new Set(knownFingerprints);
+  const nowMs = Date.now();
+
+  const knownMap = new Map(
+    knownRows.map((row) => [row.fingerprint, row] as const)
+  );
+
+  const batchSeen = new Set<string>();
 
   for (const alert of alerts) {
     const fp = buildPrivacyFingerprintFromAlert(alert);
-    if (seen.has(fp)) {
+    const row = knownMap.get(fp);
+
+    if (row) {
+      const policy = getPrivacyAlertCooldownPolicy(row.alert_family);
+      const ageHours = (nowMs - new Date(row.last_seen_at).getTime()) / 3_600_000;
+
+      if (ageHours < policy.cooldown_hours) {
+        suppressedFingerprints.push(fp);
+        continue;
+      }
+    }
+
+    if (batchSeen.has(fp)) {
       suppressedFingerprints.push(fp);
       continue;
     }
-    seen.add(fp);
+
+    batchSeen.add(fp);
     kept.push(alert);
   }
 

@@ -524,7 +524,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                         unifyPrivacyAlertDoctrine(consolidatedPromotedAlerts);
 
                       const knownPrivacyFingerprints =
-                        await loadRecentPrivacyFingerprints(db, 2);
+                        await loadRecentPrivacyFingerprints(db, 24);
 
                       const historyResult =
                         suppressFingerprintKnownAlerts(
