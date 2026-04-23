@@ -54,6 +54,7 @@ import {
   upsertPrivacyFingerprintRecords,
   bumpSuppressedPrivacyFingerprints,
 } from '@/lib/sovereign/privacy-alert-fingerprint-store';
+import { insertPrivacySuppressionReceipts } from '@/lib/sovereign/privacy-alert-suppression-receipts';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
@@ -538,6 +539,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                         await bumpSuppressedPrivacyFingerprints(
                           db,
                           historyResult.suppressedFingerprints,
+                        );
+
+                        await insertPrivacySuppressionReceipts(
+                          db,
+                          historyResult.suppressionCandidates,
                         );
                       }
 

@@ -719,3 +719,19 @@ export interface PrivacyAlertFingerprintRow {
   methodology_version: string;
   created_at:          string;
 }
+
+
+export interface PrivacyAlertSuppressionReceiptRow {
+  receipt_id:          string;
+  fingerprint:         string;
+  alert_family:        string;
+  candidate_alert_type:string;
+  token_mint:          string | null;
+  shadow_family_id:    string | null;
+  suppression_reason:  string;
+  cooldown_hours:      number | null;
+  last_seen_at:        string | null;
+  suppressed_at:       string;
+  methodology_version: string;
+  created_at:          string;
+}

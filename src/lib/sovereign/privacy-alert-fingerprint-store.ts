@@ -8,6 +8,11 @@
 import type { createAdminClient } from '@/lib/supabase/server';
 import type { AlertInsert } from '@/lib/flow-engine/anomaly-detector';
 import { getPrivacyAlertCooldownPolicy } from './privacy-alert-cooldown-policy';
+import {
+  buildPrivacyBatchDuplicateSuppressionCandidate,
+  buildPrivacyCooldownSuppressionCandidate,
+  type PrivacySuppressionCandidate,
+} from './privacy-alert-suppression-receipts';
 
 type Db = ReturnType<typeof createAdminClient>;
 
@@ -109,9 +114,11 @@ export function suppressFingerprintKnownAlerts(
 ): {
   kept: AlertInsert[];
   suppressedFingerprints: string[];
+  suppressionCandidates: PrivacySuppressionCandidate[];
 } {
   const kept: AlertInsert[] = [];
   const suppressedFingerprints: string[] = [];
+  const suppressionCandidates: PrivacySuppressionCandidate[] = [];
   const nowMs = Date.now();
 
   const knownMap = new Map(
@@ -130,12 +137,18 @@ export function suppressFingerprintKnownAlerts(
 
       if (ageHours < policy.cooldown_hours) {
         suppressedFingerprints.push(fp);
+        suppressionCandidates.push(
+          buildPrivacyCooldownSuppressionCandidate(alert, row.last_seen_at)
+        );
         continue;
       }
     }
 
     if (batchSeen.has(fp)) {
       suppressedFingerprints.push(fp);
+      suppressionCandidates.push(
+        buildPrivacyBatchDuplicateSuppressionCandidate(alert)
+      );
       continue;
     }
 
@@ -143,7 +156,7 @@ export function suppressFingerprintKnownAlerts(
     kept.push(alert);
   }
 
-  return { kept, suppressedFingerprints };
+  return { kept, suppressedFingerprints, suppressionCandidates };
 }
 
 export async function upsertPrivacyFingerprintRecords(
