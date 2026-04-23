@@ -706,3 +706,16 @@ export interface PrivacySequenceAlertCandidateRow {
   methodology_version:  string;
   created_at:           string;
 }
+
+
+export interface PrivacyAlertFingerprintRow {
+  fingerprint:         string;
+  alert_family:        string;
+  token_mint:          string | null;
+  shadow_family_id:    string | null;
+  first_seen_at:       string;
+  last_seen_at:        string;
+  suppression_count:   number;
+  methodology_version: string;
+  created_at:          string;
+}
