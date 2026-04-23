@@ -44,6 +44,7 @@ import {
 }                                            from '@/lib/sovereign/alert-engine';
 import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
+import { derivePrivacySequenceAlertCandidates } from '@/lib/sovereign/privacy-sequence-alerts';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
@@ -467,6 +468,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   log('warn', `Privacy lifecycle sequence insert failed (non-critical): ${sequenceErr.message}`);
                 } else {
                   log('info', `Privacy lifecycle sequences written: ${insertedSequences?.length ?? 0}`);
+
+                  const candidateSource = lifecycleSequences as Array<{
+                    sequence_id: string;
+                    start_event_id: string;
+                    end_event_id: string;
+                    token_mint: string | null;
+                    token_symbol: string | null;
+                    shadow_family_id: string | null;
+                    start_stage: string;
+                    end_stage: string;
+                    stage_path: string[];
+                    sequence_confidence: number;
+                    elapsed_seconds: number | null;
+                    sequence_reason: string | null;
+                    end_event_time: string;
+                    methodology_version: string;
+                  }>;
+
+                  const sequenceCandidates = derivePrivacySequenceAlertCandidates(candidateSource);
+
+                  if (sequenceCandidates.length > 0) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const { data: insertedCandidates, error: candidateErr } = await db
+                      .from('privacy_sequence_alert_candidates')
+                      .upsert(sequenceCandidates as any, { onConflict: 'candidate_id' })
+                      .select('candidate_id');
+
+                    if (candidateErr) {
+                      log('warn', `Privacy sequence candidate insert failed (non-critical): ${candidateErr.message}`);
+                    } else {
+                      log('info', `Privacy sequence alert candidates written: ${insertedCandidates?.length ?? 0}`);
+                    }
+                  } else {
+                    log('info', 'Privacy sequence alert candidates: no high-signal candidate patterns in this sovereign batch');
+                  }
                 }
               } else {
                 log('info', 'Privacy lifecycle sequences: no forward stage progressions in this sovereign batch');

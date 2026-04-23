@@ -676,3 +676,30 @@ export interface PrivacyLifecycleSequenceRow {
   created_at:           string;
 }
 
+
+
+export interface PrivacySequenceAlertCandidateRow {
+  candidate_id:         string;
+  sequence_id:          string;
+  start_event_id:       string;
+  end_event_id:         string;
+
+  token_mint:           string | null;
+  token_symbol:         string | null;
+  shadow_family_id:     string | null;
+
+  start_stage:          string;
+  end_stage:            string;
+  stage_path:           string[];
+
+  candidate_type:       string;
+  candidate_priority:   string;
+  candidate_confidence: number;
+  candidate_reason:     string | null;
+  candidate_evidence:   string[];
+
+  elapsed_seconds:      number | null;
+  end_event_time:       string;
+  methodology_version:  string;
+  created_at:           string;
+}
