@@ -25,7 +25,7 @@ import type { createAdminClient } from '@/lib/supabase/server';
 import { txToRawRow, type RawTxPayload } from '@/lib/decoder';
 import type { NormalizedOutput } from '@/lib/normalizer';
 import { envelopeFromHeliusPayload } from '@/lib/sovereign/ingest-envelope';
-import { normalizeIngestEnvelope } from '@/lib/sovereign/ingest-pipeline';
+import { normalizeProviderEnvelopes } from '@/lib/sovereign/provider-normalization';
 import { resolveTokenMetadataBatch } from '@/lib/helius/token-metadata';
 import { resolveAddressBatch } from '@/lib/entity-graph';
 import { sendMessage } from '@/lib/telegram/bot';
@@ -113,25 +113,13 @@ export class HeliusWebhookProcessor {
   ): Promise<WebhookProcessingReceipt> {
 
     // 1. Decode + normalize via the sovereign pipeline
-    const normalized: NormalizedOutput[] = txns.map((tx) => {
-      try {
-        const envelope = envelopeFromHeliusPayload(tx);
-        return normalizeIngestEnvelope(envelope, ctx);
-      } catch (err) {
-        log('warn', `Normalize failed for tx ${(tx as any)?.signature ?? 'unknown'}`, err);
-        return {
-          signature:          (tx as any)?.signature ?? '',
-          movement:           null,
-          tokenMovement:      null,
-          whaleAddressHint:   null,
-          skipped:            true,
-          tokenDeltaAnalysis: null,
-        };
-      }
-    });
+    const envelopes = txns.map((tx) => envelopeFromHeliusPayload(tx));
+    const {
+      normalized,
+      classified,
+      token_classified: tokenClassified,
+    } = normalizeProviderEnvelopes(envelopes, ctx);
 
-    const classified      = normalized.filter(out => out.movement      !== null).length;
-    const tokenClassified = normalized.filter(out => out.tokenMovement !== null).length;
     log('info', `Classified ${classified}/${txns.length} movements, ${tokenClassified} token movements`);
 
     // 2. Persist SOL/USDC movements
