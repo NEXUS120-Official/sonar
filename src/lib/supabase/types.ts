@@ -793,3 +793,26 @@ export interface SovereignMintEnrichmentQueueRow {
   last_error: string | null;
   created_at: string;
 }
+
+
+export interface SovereignPriceRegistryRow {
+  asset_key: string;
+  symbol: string | null;
+  price_usd: number | null;
+  price_confidence: string;
+  price_source_mode: string;
+  valuation_reason: string | null;
+  raw_snapshot: Record<string, unknown> | null;
+  last_price_at: string;
+  created_at: string;
+}
+
+export interface SovereignPriceEnrichmentQueueRow {
+  asset_key: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  sighting_count: number;
+  status: string;
+  last_error: string | null;
+  created_at: string;
+}

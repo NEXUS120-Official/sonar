@@ -58,6 +58,7 @@ import { insertPrivacySuppressionReceipts } from '@/lib/sovereign/privacy-alert-
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 import { enqueueUnknownMint } from '@/lib/sovereign/sovereign-mint-enricher';
+import { enqueueUnknownPriceAsset } from '@/lib/sovereign/sovereign-price-runtime';
 
 // ── Logging ───────────────────────────────────────────────────
 

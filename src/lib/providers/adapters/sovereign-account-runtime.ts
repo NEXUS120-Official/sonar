@@ -9,6 +9,7 @@
 import type { createAdminClient } from '@/lib/supabase/server';
 
 type Db = ReturnType<typeof createAdminClient>;
+import { deriveUsdValue } from '@/lib/sovereign/sovereign-price-runtime';
 
 export interface SovereignTokenBalance {
   mint: string;
@@ -134,4 +135,26 @@ export async function loadSovereignAccountStateFromRaw(
   }
 
   return null;
+}
+
+
+export async function deriveValuedAccountSnapshot(
+  db: Db,
+  state: SovereignAccountState,
+): Promise<SovereignAccountSnapshot> {
+  const snap = deriveAccountSnapshot(state);
+
+  const [solVal, usdcVal] = await Promise.all([
+    deriveUsdValue(db, 'SOL', snap.sol_balance),
+    deriveUsdValue(db, 'USDC', snap.usdc_balance),
+  ]);
+
+  const total =
+    (solVal.value_usd ?? 0) +
+    (usdcVal.value_usd ?? 0);
+
+  return {
+    ...snap,
+    total_value_usd: total > 0 ? total : null,
+  };
 }
