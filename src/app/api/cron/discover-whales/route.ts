@@ -1,3 +1,9 @@
+// LEGACY WHALE DISCOVERY NOTICE:
+// This path remains for backward compatibility while SONAR
+// transitions from Helius/GMGN-assisted discovery to sovereign,
+// provider-agnostic whale discovery.
+// Strategic direction: /api/cron/discover-sovereign-whales
+
 // ============================================================
 // SONAR v2.0 — Discover Whales Cron
 // POST /api/cron/discover-whales

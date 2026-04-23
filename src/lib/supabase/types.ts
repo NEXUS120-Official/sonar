@@ -748,3 +748,17 @@ export interface SovereignAccountStateSnapshotRow {
   fetched_at: string;
   source_mode: string;
 }
+
+
+export interface SovereignWhaleCandidateRow {
+  address: string;
+  discovery_method: string;
+  source_exchange: string | null;
+  triggering_signature: string | null;
+  first_seen_at: string;
+  evidence_count: number;
+  estimated_balance_usd: number | null;
+  confidence_score: number;
+  linkage_reason: string;
+  methodology_version: string;
+}
