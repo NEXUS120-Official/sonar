@@ -53,7 +53,10 @@ export type AlertType =
   | 'family_privacy_bridgehead'         // family-level privacy activation becomes operationally visible
   | 'privacy_exit_to_public_flow'       // privacy-capable asset re-emerges in visible public flow
   | 'post_privacy_downstream_move'      // downstream public-side move after privacy-capable context
-  | 'family_privacy_reemergence';       // family-level privacy re-emergence into public-side activity
+  | 'family_privacy_reemergence'        // family-level privacy re-emergence into public-side activity
+  | 'privacy_sequence_bridgehead_reemergence' // lifecycle sequence: bridgehead -> public re-emergence
+  | 'privacy_sequence_downstream_continuation' // lifecycle sequence: re-emergence -> downstream continuation
+  | 'privacy_sequence_family_reemergence'; // lifecycle sequence: family-linked re-emergence candidate
 
 export type AlertSeverity = 'info' | 'notable' | 'significant' | 'major';
 

@@ -45,6 +45,7 @@ import {
 import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
 import { derivePrivacySequenceAlertCandidates } from '@/lib/sovereign/privacy-sequence-alerts';
+import { promotePrivacySequenceCandidatesToAlerts } from '@/lib/sovereign/privacy-sequence-alert-promotion';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
@@ -499,6 +500,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                       log('warn', `Privacy sequence candidate insert failed (non-critical): ${candidateErr.message}`);
                     } else {
                       log('info', `Privacy sequence alert candidates written: ${insertedCandidates?.length ?? 0}`);
+
+                      const promotedAlerts = promotePrivacySequenceCandidatesToAlerts(
+                        sequenceCandidates.map((c) => ({
+                          ...c,
+                          created_at: new Date().toISOString(),
+                        })),
+                        70,
+                      );
+
+                      if (promotedAlerts.length > 0) {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const { data: insertedPromoted, error: promotedErr } = await db
+                          .from('alerts')
+                          .insert(promotedAlerts as any)
+                          .select('id');
+
+                        if (promotedErr) {
+                          log('warn', `Privacy sequence promoted alert insert failed (non-critical): ${promotedErr.message}`);
+                        } else {
+                          alerts_generated += insertedPromoted?.length ?? 0;
+                          log('info', `Privacy sequence promoted alerts written: ${insertedPromoted?.length ?? 0}`);
+                        }
+                      } else {
+                        log('info', 'Privacy sequence promoted alerts: no candidates above promotion threshold');
+                      }
                     }
                   } else {
                     log('info', 'Privacy sequence alert candidates: no high-signal candidate patterns in this sovereign batch');

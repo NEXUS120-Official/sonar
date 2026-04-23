@@ -74,6 +74,9 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   privacy_exit_to_public_flow:    '🌤️ Privacy Exit to Public Flow',
   post_privacy_downstream_move:   '➡️ Post-Privacy Downstream Move',
   family_privacy_reemergence:     '🕸️ Family Privacy Re-Emergence',
+  privacy_sequence_bridgehead_reemergence: '🌉 Privacy Sequence: Bridgehead → Re-Emergence',
+  privacy_sequence_downstream_continuation: '➡️ Privacy Sequence: Downstream Continuation',
+  privacy_sequence_family_reemergence: '🕸️ Privacy Sequence: Family Re-Emergence',
 };
 
 // ── Numeric context from data JSONB ───────────────────────────
