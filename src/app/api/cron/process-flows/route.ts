@@ -47,6 +47,7 @@ import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
 import { derivePrivacySequenceAlertCandidates } from '@/lib/sovereign/privacy-sequence-alerts';
 import { consolidatePrivacySequencePromotedAlerts } from '@/lib/sovereign/privacy-sequence-alert-consolidation';
+import { unifyPrivacyAlertDoctrine } from '@/lib/sovereign/privacy-alert-doctrine';
 import { envelopeFromRawTxRow }             from '@/lib/sovereign/ingest-envelope';
 import { normalizeReplayRowsWithFallback } from '@/lib/sovereign/replay-normalization';
 
@@ -513,18 +514,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                       const consolidatedPromotedAlerts =
                         consolidatePrivacySequencePromotedAlerts(promotedAlerts);
 
-                      if (consolidatedPromotedAlerts.length > 0) {
+                      const doctrineUnifiedAlerts =
+                        unifyPrivacyAlertDoctrine(consolidatedPromotedAlerts);
+
+                      if (doctrineUnifiedAlerts.length > 0) {
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         const { data: insertedPromoted, error: promotedErr } = await db
                           .from('alerts')
-                          .insert(consolidatedPromotedAlerts as any)
+                          .insert(doctrineUnifiedAlerts as any)
                           .select('id');
 
                         if (promotedErr) {
                           log('warn', `Privacy sequence promoted alert insert failed (non-critical): ${promotedErr.message}`);
                         } else {
                           alerts_generated += insertedPromoted?.length ?? 0;
-                          log('info', `Privacy sequence promoted alerts written: ${insertedPromoted?.length ?? 0} (from ${promotedAlerts.length} raw / ${consolidatedPromotedAlerts.length} consolidated)`);
+                          log('info', `Privacy sequence promoted alerts written: ${insertedPromoted?.length ?? 0} (from ${promotedAlerts.length} raw / ${consolidatedPromotedAlerts.length} consolidated / ${doctrineUnifiedAlerts.length} doctrine-unified)`);
                         }
                       } else {
                         log('info', 'Privacy sequence promoted alerts: no candidates above promotion threshold');
