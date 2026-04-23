@@ -1,3 +1,10 @@
+// LEGACY ADAPTER NOTICE:
+// This route remains for backward compatibility while SONAR
+// transitions to sovereign/provider-agnostic ingest.
+// Strategic direction: /api/webhook/sovereign
+//
+// Helius should become an adapter, not the core ingest doctrine.
+
 // ============================================================
 // SONAR v2.0 — Helius Webhook Receiver
 // POST /api/webhook/helius
