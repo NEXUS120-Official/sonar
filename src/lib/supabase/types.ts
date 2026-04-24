@@ -856,3 +856,14 @@ export interface SovereignValuationCoverageRow {
   last_price_at: string | null;
   price_source_mode: string;
 }
+
+
+export interface SovereignPriceMergePreviewRow {
+  asset_key: string;
+  price_usd: number | null;
+  price_confidence: string;
+  price_source_mode: string;
+  merge_score: number;
+  merge_reason: string;
+  last_price_at: string | null;
+}

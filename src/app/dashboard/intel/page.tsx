@@ -187,6 +187,31 @@ export default async function IntelPage() {
         </div>
       </Link>
 
+      {/* Price Merge entrypoint */}
+      <Link
+        href="/dashboard/price-merge"
+        className="block rounded-xl border p-5 transition hover:opacity-90"
+        style={{ background: '#12121a', borderColor: '#1e1e2e' }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p
+              className="text-xs uppercase tracking-widest mb-3"
+              style={{ color: '#6b6b80', fontFamily: 'var(--font-mono)' }}
+            >
+              New Intel Surface
+            </p>
+            <h2 className="text-lg font-semibold">Price Merge Policy</h2>
+            <p className="text-sm mt-2 max-w-3xl" style={{ color: '#6b6b80' }}>
+              Ranked price candidates, effective selection, and deterministic valuation-source auditability.
+            </p>
+          </div>
+          <div className="text-sm font-medium shrink-0" style={{ color: '#22d3ee' }}>
+            Open dashboard →
+          </div>
+        </div>
+      </Link>
+
       {/* Privacy Lifecycle entrypoint */}
       <Link
         href="/dashboard/privacy-lifecycle"

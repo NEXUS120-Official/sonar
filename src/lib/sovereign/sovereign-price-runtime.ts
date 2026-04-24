@@ -10,6 +10,7 @@ import type { createAdminClient } from '@/lib/supabase/server';
 
 type Db = ReturnType<typeof createAdminClient>;
 import { applyPriceDoctrine, type SovereignPriceConfidence } from './sovereign-price-doctrine';
+import { selectEffectiveSovereignPrice, type SovereignPriceCandidate } from './sovereign-price-merge-policy';
 
 export interface SovereignPriceInspection {
   asset_key: string;
@@ -189,7 +190,7 @@ export async function deriveUsdValue(
   assetKey: string,
   amount: number | null,
 ): Promise<ValuationResult> {
-  const priceRow = await loadLatestPriceRow(db, assetKey);
+  const priceRow = await loadEffectivePriceRow(db, assetKey);
 
   return applyPriceDoctrine({
     asset_key: assetKey,
@@ -200,4 +201,66 @@ export async function deriveUsdValue(
     last_price_at: priceRow?.last_price_at ?? null,
     price_source_mode: priceRow?.price_source_mode ?? 'sovereign_price_runtime_v1',
   });
+}
+
+
+export async function loadPriceCandidates(
+  db: Db,
+  assetKey: string,
+): Promise<SovereignPriceCandidate[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db as any)
+    .from('sovereign_price_registry')
+    .select('asset_key, symbol, price_usd, price_confidence, price_source_mode, valuation_reason, last_price_at, raw_snapshot')
+    .eq('asset_key', assetKey)
+    .order('last_price_at', { ascending: false })
+    .limit(20);
+
+  if (error) throw error;
+
+  return ((data ?? []) as Array<{
+    asset_key: string;
+    symbol: string | null;
+    price_usd: number | null;
+    price_confidence: SovereignPriceConfidence;
+    price_source_mode: string;
+    valuation_reason: string | null;
+    last_price_at: string | null;
+    raw_snapshot: Record<string, unknown> | null;
+  }>).map((r) => ({
+    asset_key: r.asset_key,
+    symbol: r.symbol,
+    price_usd: r.price_usd,
+    price_confidence: r.price_confidence,
+    price_source_mode: r.price_source_mode,
+    valuation_reason: r.valuation_reason,
+    last_price_at: r.last_price_at,
+    raw_snapshot: r.raw_snapshot,
+  }));
+}
+
+export async function loadEffectivePriceRow(
+  db: Db,
+  assetKey: string,
+): Promise<{
+  asset_key: string;
+  price_usd: number | null;
+  price_confidence: SovereignPriceConfidence;
+  valuation_reason: string | null;
+  last_price_at: string | null;
+  price_source_mode: string;
+} | null> {
+  const candidates = await loadPriceCandidates(db, assetKey);
+  const selected = selectEffectiveSovereignPrice(candidates).effective;
+
+  if (!selected) return null;
+
+  return {
+    asset_key: selected.asset_key,
+    price_usd: selected.price_usd,
+    price_confidence: selected.price_confidence,
+    valuation_reason: selected.valuation_reason,
+    last_price_at: selected.last_price_at,
+    price_source_mode: selected.price_source_mode,
+  };
 }
