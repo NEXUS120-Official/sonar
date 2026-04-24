@@ -103,6 +103,7 @@ export default async function Home() {
           >
             Get Alerts on Telegram
           </a>
+          <a href="https://checkout.dodopayments.com/buy/pdt_0NdP2vm9fv4FGj9BNOxHF?quantity=1" target="_blank" rel="noopener noreferrer" className="px-6 py-3 rounded-lg font-semibold text-sm transition-opacity hover:opacity-80" style={{ background: "#00D4FF", color: "#0A0A0F" }}>Go Pro — €19/mo</a>
         </div>
       </section>
 
