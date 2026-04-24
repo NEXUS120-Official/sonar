@@ -916,3 +916,17 @@ export interface SovereignExchangeValuationCompletenessPreviewRow {
   partial_wallets: number;
   unknown_wallets: number;
 }
+
+
+export interface SovereignWhaleCandidateRankingPreviewRow {
+  address: string;
+  estimated_balance_usd: number | null;
+  confidence_score: number;
+  valuation_completeness_ratio: number;
+  valuation_status: string;
+  source_exchange: string | null;
+  evidence_count: number;
+  ranking_score: number;
+  ranking_band: string;
+  ranking_reason: string;
+}
