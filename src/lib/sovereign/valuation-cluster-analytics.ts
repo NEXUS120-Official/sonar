@@ -100,16 +100,27 @@ export async function getWhaleValuationCompletenessRows(
   db: Db,
   limit: number = 100,
 ): Promise<WhaleValuationCompletenessRow[]> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (db as any)
-    .from('sovereign_whale_candidates')
-    .select('address, estimated_balance_usd, priced_component_count, unpriced_component_count, valuation_completeness_ratio, valuation_status, discovery_method, source_exchange')
-    .order('first_seen_at', { ascending: false })
-    .limit(limit);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (db as any)
+      .from('sovereign_whale_candidates')
+      .select('address, estimated_balance_usd, priced_component_count, unpriced_component_count, valuation_completeness_ratio, valuation_status, discovery_method, source_exchange')
+      .order('first_seen_at', { ascending: false })
+      .limit(limit);
 
-  if (error) throw error;
+    if (error) {
+      const msg = String(error.message ?? '');
+      const code = String(error.code ?? '');
+      if (code === 'PGRST205' || msg.includes('schema cache') || msg.includes('Could not find the table')) {
+        return [];
+      }
+      throw error;
+    }
 
-  return (data ?? []) as WhaleValuationCompletenessRow[];
+    return (data ?? []) as WhaleValuationCompletenessRow[];
+  } catch {
+    return [];
+  }
 }
 
 export async function getExchangeValuationCompletenessRows(
