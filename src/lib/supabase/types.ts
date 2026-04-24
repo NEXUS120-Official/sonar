@@ -758,6 +758,10 @@ export interface SovereignWhaleCandidateRow {
   first_seen_at: string;
   evidence_count: number;
   estimated_balance_usd: number | null;
+  priced_component_count: number;
+  unpriced_component_count: number;
+  valuation_completeness_ratio: number;
+  valuation_status: string;
   confidence_score: number;
   linkage_reason: string;
   methodology_version: string;
@@ -866,4 +870,32 @@ export interface SovereignPriceMergePreviewRow {
   merge_score: number;
   merge_reason: string;
   last_price_at: string | null;
+}
+
+
+export interface SovereignValuationCompleteness {
+  priced_asset_count: number;
+  unpriced_asset_count: number;
+  valuation_completeness_ratio: number;
+  valuation_status: 'complete' | 'partial' | 'unknown';
+}
+
+export interface SovereignValuedTokenComponentRow {
+  asset_key: string;
+  amount: number | null;
+  price_usd: number | null;
+  effective_price_usd: number | null;
+  value_usd: number | null;
+  effective_confidence: string;
+  is_stale_price: boolean;
+  valuation_status: string;
+}
+
+export interface SovereignWhaleCandidateValuationPreviewRow {
+  address: string;
+  estimated_balance_usd: number | null;
+  priced_component_count: number;
+  unpriced_component_count: number;
+  valuation_completeness_ratio: number;
+  valuation_status: string;
 }

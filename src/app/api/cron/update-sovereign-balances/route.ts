@@ -9,7 +9,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import {
   loadSovereignAccountStateFromRaw,
-  deriveValuedAccountSnapshot,
+  deriveValuedAccountSnapshotWithCompleteness,
 } from '@/lib/providers/adapters/sovereign-account-runtime';
 
 function verifyCronSecret(req: NextRequest): boolean {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const state = await loadSovereignAccountStateFromRaw(db, whale.address);
     if (!state) continue;
 
-    const snap = await deriveValuedAccountSnapshot(db, state);
+    const snap = await deriveValuedAccountSnapshotWithCompleteness(db, state);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: updErr } = await (db as any)

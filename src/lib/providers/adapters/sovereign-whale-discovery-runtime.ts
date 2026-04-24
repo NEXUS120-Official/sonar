@@ -7,6 +7,7 @@
 // ============================================================
 
 import type { createAdminClient } from '@/lib/supabase/server';
+import { deriveValuedAccountSnapshotWithCompleteness } from '@/lib/providers/adapters/sovereign-account-runtime';
 
 type Db = ReturnType<typeof createAdminClient>;
 

@@ -10,6 +10,8 @@ import type { createAdminClient } from '@/lib/supabase/server';
 
 type Db = ReturnType<typeof createAdminClient>;
 import { deriveUsdValue } from '@/lib/sovereign/sovereign-price-runtime';
+import { computeValuationCompleteness, deriveComponentValuationStatus } from '@/lib/sovereign/sovereign-valuation-completeness';
+import type { SovereignValuedTokenComponentRow } from '@/lib/supabase/types';
 
 export interface SovereignTokenBalance {
   mint: string;
@@ -19,7 +21,43 @@ export interface SovereignTokenBalance {
   decimals: number | null;
   symbol: string | null;
   token_program: 'spl_token' | 'token_2022' | 'unknown';
+  amount?: number | null;
+  ui_amount?: number | null;
+  uiAmount?: number | null;
+  balance?: number | null;
+  token_balance?: number | null;
+  quantity?: number | null;
 }
+
+function getTokenBalanceAmount(tb: SovereignTokenBalance): number | null {
+  const raw = tb as unknown as Record<string, unknown>;
+
+  const candidates = [
+    tb.amount,
+    tb.amount_ui,
+    tb.ui_amount,
+    tb.uiAmount,
+    tb.balance,
+    tb.token_balance,
+    tb.quantity,
+    raw['amount'],
+    raw['amount_ui'],
+    raw['ui_amount'],
+    raw['uiAmount'],
+    raw['balance'],
+    raw['token_balance'],
+    raw['quantity'],
+  ];
+
+  for (const v of candidates) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+
+  return null;
+}
+
+
+
 
 export interface SovereignAccountState {
   address: string;
@@ -61,15 +99,20 @@ export function normalizeRawAccountState(
   const token_balances = Array.isArray(raw['token_balances'])
     ? raw['token_balances']
         .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-        .map((row) => ({
-          mint: typeof row['mint'] === 'string' ? row['mint'] : 'unknown',
-          owner: typeof row['owner'] === 'string' ? row['owner'] : null,
-          amount_raw: typeof row['amount_raw'] === 'string' ? row['amount_raw'] : null,
-          amount_ui: asNumber(row['amount_ui']),
-          decimals: asNumber(row['decimals']),
-          symbol: typeof row['symbol'] === 'string' ? row['symbol'] : null,
-          token_program: inferTokenProgram(row['token_program']),
-        }))
+        .map((row) => {
+          const amountUi = asNumber(row['amount_ui']);
+          return {
+            mint: typeof row['mint'] === 'string' ? row['mint'] : 'unknown',
+            owner: typeof row['owner'] === 'string' ? row['owner'] : null,
+            amount_raw: typeof row['amount_raw'] === 'string' ? row['amount_raw'] : null,
+            amount_ui: amountUi,
+            decimals: asNumber(row['decimals']),
+            symbol: typeof row['symbol'] === 'string' ? row['symbol'] : null,
+            token_program: inferTokenProgram(row['token_program']),
+            amount: amountUi,
+            ui_amount: amountUi,
+          };
+        })
     : [];
 
   return {
@@ -91,7 +134,7 @@ export function deriveAccountSnapshot(
 
   for (const t of state.token_balances) {
     const sym = (t.symbol ?? '').toUpperCase();
-    const amt = t.amount_ui ?? 0;
+    const amt = getTokenBalanceAmount(t) ?? 0;
 
     if (sym === 'USDC') usdc_balance += amt;
     if (sym === 'MSOL') staked_msol += amt;
@@ -156,5 +199,88 @@ export async function deriveValuedAccountSnapshot(
   return {
     ...snap,
     total_value_usd: total > 0 ? total : null,
+  };
+}
+
+
+export async function deriveTokenValuationComponents(
+  db: Db,
+  state: SovereignAccountState,
+): Promise<SovereignValuedTokenComponentRow[]> {
+  const components: SovereignValuedTokenComponentRow[] = [];
+
+  const solVal = await deriveUsdValue(db, 'SOL', state.native_sol_balance);
+  components.push({
+    asset_key: 'SOL',
+    amount: state.native_sol_balance,
+    price_usd: solVal.price_usd,
+    effective_price_usd: solVal.effective_price_usd,
+    value_usd: solVal.value_usd,
+    effective_confidence: solVal.effective_confidence,
+    is_stale_price: solVal.is_stale_price,
+    valuation_status: deriveComponentValuationStatus(solVal),
+  });
+
+  const usdcBal = state.token_balances.find((t) => t.symbol === 'USDC');
+  if (usdcBal) {
+    const usdcVal = await deriveUsdValue(db, 'USDC', getTokenBalanceAmount(usdcBal));
+    components.push({
+      asset_key: 'USDC',
+      amount: getTokenBalanceAmount(usdcBal),
+      price_usd: usdcVal.price_usd,
+      effective_price_usd: usdcVal.effective_price_usd,
+      value_usd: usdcVal.value_usd,
+      effective_confidence: usdcVal.effective_confidence,
+      is_stale_price: usdcVal.is_stale_price,
+      valuation_status: deriveComponentValuationStatus(usdcVal),
+    });
+  }
+
+  for (const tb of state.token_balances) {
+    if (tb.symbol === 'USDC') continue;
+
+    const assetKey = tb.symbol || tb.mint;
+    const val = await deriveUsdValue(db, assetKey, getTokenBalanceAmount(tb));
+
+    components.push({
+      asset_key: assetKey,
+      amount: getTokenBalanceAmount(tb),
+      price_usd: val.price_usd,
+      effective_price_usd: val.effective_price_usd,
+      value_usd: val.value_usd,
+      effective_confidence: val.effective_confidence,
+      is_stale_price: val.is_stale_price,
+      valuation_status: deriveComponentValuationStatus(val),
+    });
+  }
+
+  return components;
+}
+
+export async function deriveValuedAccountSnapshotWithCompleteness(
+  db: Db,
+  state: SovereignAccountState,
+): Promise<SovereignAccountSnapshot & {
+  priced_asset_count: number;
+  unpriced_asset_count: number;
+  valuation_completeness_ratio: number;
+  valuation_status: 'complete' | 'partial' | 'unknown';
+}> {
+  const snap = deriveAccountSnapshot(state);
+  const components = await deriveTokenValuationComponents(db, state);
+  const completeness = computeValuationCompleteness(components);
+
+  const total_value_usd = components.reduce(
+    (sum, c) => sum + (c.value_usd ?? 0),
+    0,
+  );
+
+  return {
+    ...snap,
+    total_value_usd: total_value_usd > 0 ? total_value_usd : null,
+    priced_asset_count: completeness.priced_asset_count,
+    unpriced_asset_count: completeness.unpriced_asset_count,
+    valuation_completeness_ratio: completeness.valuation_completeness_ratio,
+    valuation_status: completeness.valuation_status,
   };
 }
