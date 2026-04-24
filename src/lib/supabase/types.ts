@@ -831,3 +831,14 @@ export interface SovereignValuationDoctrinePreviewRow {
   price_age_seconds: number | null;
   is_stale_price: boolean;
 }
+
+
+export interface SovereignAlertDoctrinePreviewRow {
+  alert_type: string;
+  severity: string;
+  valuation_doctrine_reason: string | null;
+  valuation_value_usd: number | null;
+  valuation_effective_confidence: string | null;
+  valuation_is_stale_price: boolean;
+  created_at: string;
+}

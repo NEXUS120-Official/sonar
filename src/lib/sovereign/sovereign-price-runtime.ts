@@ -25,11 +25,15 @@ export interface ValuationResult {
   asset_key: string;
   amount: number | null;
   price_usd: number | null;
+  effective_price_usd: number | null;
   value_usd: number | null;
   price_confidence: SovereignPriceConfidence;
+  effective_confidence: SovereignPriceConfidence;
   valuation_reason: string;
   last_price_at: string | null;
   price_source_mode: string;
+  price_age_seconds: number | null;
+  is_stale_price: boolean;
 }
 
 function asNum(v: unknown): number | null {

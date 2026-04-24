@@ -42,6 +42,7 @@ import {
   consolidateAlerts,
   decisionToAlertInsert,
   deriveSequenceAwareAlertInserts,
+  applyValuationDoctrineToAlertInsert,
 }                                            from '@/lib/sovereign/alert-engine';
 import type { NormalizedOutput }             from '@/lib/normalizer';
 import { derivePrivacyLifecycleSequencesFromEvents } from '@/lib/sovereign/privacy-sequence-engine';
@@ -534,8 +535,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                         70,
                       );
 
+                      const valuationAwarePromotedAlerts = await Promise.all(
+                        promotedAlerts.map((a) => applyValuationDoctrineToAlertInsert(db, a))
+                      );
+
                       const consolidatedPromotedAlerts =
-                        consolidatePrivacySequencePromotedAlerts(promotedAlerts);
+                        consolidatePrivacySequencePromotedAlerts(valuationAwarePromotedAlerts);
 
                       const doctrineUnifiedAlerts =
                         unifyPrivacyAlertDoctrine(consolidatedPromotedAlerts);

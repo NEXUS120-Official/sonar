@@ -31,6 +31,9 @@
 // ============================================================
 
 import type { PersistableSovereignSignal } from './persistence-manager';
+import { deriveUsdValue } from '@/lib/sovereign/sovereign-price-runtime';
+import { applyAlertValuationDoctrine } from '@/lib/sovereign/sovereign-alert-valuation-doctrine';
+import type { createAdminClient } from '@/lib/supabase/server';
 import type { PrivacySequenceAlertCandidateRow } from '@/lib/supabase/types';
 import type { AlertInsert }                from '@/lib/flow-engine/anomaly-detector';
 import type { AlertType, AlertSeverity }   from '@/lib/supabase/types';
@@ -1070,4 +1073,66 @@ export function deriveSequenceAwareAlertInserts(
   }
 
   return out;
+}
+
+
+type Db = ReturnType<typeof createAdminClient>;
+
+export async function applyValuationDoctrineToAlertInsert(
+  db: Db,
+  alert: AlertInsert,
+): Promise<AlertInsert> {
+  const data = (alert.data ?? {}) as Record<string, unknown>;
+
+  const tokenSymbol =
+    typeof data['token_symbol'] === 'string' ? data['token_symbol'] : null;
+
+  const tokenMint =
+    typeof data['token_mint'] === 'string' ? data['token_mint'] : null;
+
+  const amountUsd =
+    typeof data['amount_usd'] === 'number' && Number.isFinite(data['amount_usd'])
+      ? data['amount_usd']
+      : null;
+
+  const assetKey = tokenSymbol ?? tokenMint ?? 'SOL';
+
+  const valuation = await deriveUsdValue(
+    db,
+    assetKey,
+    amountUsd !== null ? 1 : null,
+  );
+
+  const doctrined = applyAlertValuationDoctrine({
+    base_severity: alert.severity,
+    valuation: amountUsd !== null
+      ? {
+          ...valuation,
+          value_usd: amountUsd,
+        }
+      : valuation,
+    additional_context: {
+      confidence_score:
+        typeof data['signal_score'] === 'number' ? data['signal_score'] : null,
+      has_privacy_context:
+        typeof alert.alert_type === 'string' &&
+        alert.alert_type.includes('privacy'),
+      has_token_risk_context:
+        Array.isArray(data['candidate_evidence']) ||
+        Array.isArray(data['token_risk_flags']),
+    },
+  });
+
+  return {
+    ...alert,
+    severity: doctrined.severity,
+    body: `${alert.body}\n\nValuation doctrine: ${doctrined.doctrine_reason}`,
+    data: {
+      ...data,
+      valuation_doctrine_reason: doctrined.doctrine_reason,
+      valuation_value_usd: doctrined.value_usd,
+      valuation_effective_confidence: doctrined.effective_confidence,
+      valuation_is_stale_price: doctrined.is_stale_price,
+    },
+  };
 }
