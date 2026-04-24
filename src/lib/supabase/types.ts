@@ -942,3 +942,19 @@ export interface SovereignExchangeLineagePreviewRow {
   lineage_band: string;
   lineage_reason: string;
 }
+
+
+export interface SovereignJoinedMovementPreviewRow {
+  signature: string;
+  asset_key: string | null;
+  flow_type: string | null;
+  token_symbol: string | null;
+  token_program_type: string | null;
+  valuation_status: string;
+  valuation_confidence: string;
+  privacy_signal: boolean;
+  exchange_lineage_band: string;
+  attribution_confidence: number;
+  linkage_reason: string;
+  methodology_version: string;
+}
