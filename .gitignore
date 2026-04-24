@@ -53,3 +53,5 @@ skills-lock.json
 
 # supabase local temp
 /supabase/.temp/
+.venv/
+.venv/

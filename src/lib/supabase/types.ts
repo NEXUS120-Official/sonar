@@ -930,3 +930,15 @@ export interface SovereignWhaleCandidateRankingPreviewRow {
   ranking_band: string;
   ranking_reason: string;
 }
+
+
+export interface SovereignExchangeLineagePreviewRow {
+  address: string;
+  source_exchange: string | null;
+  valuation_status: string;
+  confidence_score: number;
+  evidence_count: number;
+  lineage_confidence: number;
+  lineage_band: string;
+  lineage_reason: string;
+}
