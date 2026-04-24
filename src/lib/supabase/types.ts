@@ -899,3 +899,20 @@ export interface SovereignWhaleCandidateValuationPreviewRow {
   valuation_completeness_ratio: number;
   valuation_status: string;
 }
+
+
+export interface SovereignTokenValuationGapPreviewRow {
+  asset_key: string;
+  sightings: number;
+  priced_count: number;
+  unpriced_count: number;
+  priced_ratio: number;
+}
+
+export interface SovereignExchangeValuationCompletenessPreviewRow {
+  source_exchange: string;
+  wallets: number;
+  avg_completeness_ratio: number;
+  partial_wallets: number;
+  unknown_wallets: number;
+}
