@@ -22,16 +22,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const db = createAdminClient();
   const ts = new Date().toISOString();
-  const signature = `probe_${Date.now()}`;
+  const slot = Date.now();
+  const signature = `probe_${slot}`;
 
   const row = {
     signature,
+    slot,
+    block_time: ts,
+    is_vote: false,
+    status: 'success',
+    fee: 0,
     source: 'sovereign_probe',
     raw_json: {
       probe: true,
       inserted_by: 'probe_sovereign_ingest',
       created_at: ts,
       signature,
+      slot,
+      block_time: ts,
+      status: 'success',
     },
     created_at: ts,
   };
@@ -40,7 +49,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { data, error } = await (db as any)
     .from('raw_transactions')
     .upsert(row as any, { onConflict: 'signature' })
-    .select('signature, created_at, source')
+    .select('signature, created_at, source, slot, block_time, status')
     .maybeSingle();
 
   if (error) {
@@ -61,6 +70,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     meta: {
       signature,
       source: 'sovereign_probe',
+      slot,
     },
   });
 
