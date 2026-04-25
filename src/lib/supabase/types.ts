@@ -958,3 +958,26 @@ export interface SovereignJoinedMovementPreviewRow {
   linkage_reason: string;
   methodology_version: string;
 }
+
+
+export interface JoinedIntelligenceRecordRow {
+  record_id: string;
+  tx_signature: string;
+  asset_key: string | null;
+  flow_type: string | null;
+  token_symbol: string | null;
+  token_program_type: string | null;
+  valuation_status: string;
+  valuation_confidence: string;
+  privacy_signal: boolean;
+  source_exchange: string | null;
+  exchange_lineage_band: string;
+  exchange_lineage_confidence: number;
+  cluster_id: string | null;
+  cluster_confidence: number | null;
+  attribution_confidence: number;
+  linkage_reason: string;
+  evidence_bundle: unknown;
+  methodology_version: string;
+  created_at: string;
+}
