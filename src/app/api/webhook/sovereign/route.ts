@@ -106,6 +106,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     meta: {
       accepted: data?.length ?? 0,
       attempted: normalizedRows.length,
+      sample_signature: normalizedRows[0]?.signature ?? null,
     },
   });
 

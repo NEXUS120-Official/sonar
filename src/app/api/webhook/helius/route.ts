@@ -87,6 +87,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   if (txns.length === 0) {
+    const db = createAdminClient();
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_helius',
+      status: 'idle',
+      source: 'helius_webhook',
+      message: 'Empty webhook payload received',
+      meta: { received: 0 },
+    });
     return NextResponse.json({ ok: true, processed: 0 });
   }
 
