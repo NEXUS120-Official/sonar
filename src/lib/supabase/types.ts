@@ -981,3 +981,13 @@ export interface JoinedIntelligenceRecordRow {
   methodology_version: string;
   created_at: string;
 }
+
+
+export interface SystemHeartbeatRow {
+  component: string;
+  status: string;
+  source: string | null;
+  message: string | null;
+  meta: Record<string, unknown> | null;
+  updated_at: string;
+}

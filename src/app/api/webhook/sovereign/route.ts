@@ -8,6 +8,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { writeSystemHeartbeatSafe } from '@/lib/ops/system-heartbeats';
 
 
 interface IncomingRawRow {
@@ -27,11 +28,25 @@ function verifySecret(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!verifySecret(req)) {
+    const db = createAdminClient();
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_sovereign',
+      status: 'unauthorized',
+      source: 'sovereign_stream',
+      message: 'Invalid sovereign webhook secret',
+    });
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
   const db = createAdminClient();
   const body = await req.json().catch(() => null);
+
+  await writeSystemHeartbeatSafe(db, {
+    component: 'webhook_sovereign',
+    status: 'active',
+    source: 'sovereign_stream',
+    message: 'Sovereign webhook received',
+  });
 
   const rows = Array.isArray(body)
     ? body
@@ -49,6 +64,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }));
 
   if (normalizedRows.length === 0) {
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_sovereign',
+      status: 'degraded',
+      source: 'sovereign_stream',
+      message: 'No valid rows in sovereign webhook payload',
+    });
     return NextResponse.json({
       ok: false,
       accepted: 0,
@@ -63,12 +84,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .select('signature');
 
   if (error) {
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_sovereign',
+      status: 'error',
+      source: 'sovereign_stream',
+      message: error.message,
+      meta: { attempted: normalizedRows.length },
+    });
     return NextResponse.json({
       ok: false,
       accepted: 0,
       error: error.message,
     }, { status: 500 });
   }
+
+  await writeSystemHeartbeatSafe(db, {
+    component: 'webhook_sovereign',
+    status: 'ok',
+    source: 'sovereign_stream',
+    message: 'Sovereign webhook archived rows',
+    meta: {
+      accepted: data?.length ?? 0,
+      attempted: normalizedRows.length,
+    },
+  });
 
   return NextResponse.json({
     ok: true,

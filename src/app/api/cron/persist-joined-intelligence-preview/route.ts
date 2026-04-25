@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getSovereignFlowJoinerPreview } from '@/lib/sovereign/sovereign-flow-joiner-preview';
 import { joinSovereignMovement } from '@/lib/sovereign/sovereign-flow-joiner';
 import { persistJoinedIntelligenceBatch } from '@/lib/sovereign/sovereign-persistence-manager';
+import { writeSystemHeartbeatSafe } from '@/lib/ops/system-heartbeats';
 
 function verifyCronSecret(req: NextRequest): boolean {
   const got = req.headers.get('x-cron-secret');
@@ -12,10 +13,24 @@ function verifyCronSecret(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!verifyCronSecret(req)) {
+    const db = createAdminClient();
+    await writeSystemHeartbeatSafe(db, {
+      component: 'cron_persist_joined_intelligence',
+      status: 'unauthorized',
+      source: 'cron',
+      message: 'Invalid cron secret',
+    });
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
   const db = createAdminClient();
+
+  await writeSystemHeartbeatSafe(db, {
+    component: 'cron_persist_joined_intelligence',
+    status: 'active',
+    source: 'cron',
+    message: 'Persist joined intelligence run started',
+  });
 
   try {
     const preview = await getSovereignFlowJoinerPreview(db, 25);
@@ -53,12 +68,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const result = await persistJoinedIntelligenceBatch(db, joined);
 
+    await writeSystemHeartbeatSafe(db, {
+      component: 'cron_persist_joined_intelligence',
+      status: 'ok',
+      source: 'cron',
+      message: 'Persist joined intelligence run completed',
+      meta: {
+        preview_rows: preview.length,
+        joined_rows: joined.length,
+        attempted: result.attempted,
+        persisted: result.persisted,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       ...result,
       generated_at: new Date().toISOString(),
     });
   } catch (err) {
+    await writeSystemHeartbeatSafe(db, {
+      component: 'cron_persist_joined_intelligence',
+      status: 'error',
+      source: 'cron',
+      message: err instanceof Error ? err.message : String(err),
+    });
+
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : String(err) },
       { status: 500 }

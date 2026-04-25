@@ -32,6 +32,7 @@ import { createAdminClient }               from '@/lib/supabase/server';
 import { type RawTxPayload }               from '@/lib/decoder';
 import { HeliusWebhookProcessor }          from '@/lib/providers/adapters/helius-webhook';
 import { resolveSolPriceUsd }              from '@/lib/price-engine';
+import { writeSystemHeartbeatSafe }       from '@/lib/ops/system-heartbeats';
 
 const WEBHOOK_AUTH_HEADER = 'authorization';
 
@@ -64,6 +65,13 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── 1. Auth ────────────────────────────────────────────────
   if (!verifySecret(req.headers.get(WEBHOOK_AUTH_HEADER))) {
+    const db = createAdminClient();
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_helius',
+      status: 'unauthorized',
+      source: 'helius_webhook',
+      message: 'Invalid webhook secret',
+    });
     log('warn', 'Invalid webhook secret');
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 200 });
   }
@@ -87,11 +95,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Single DB client shared across the entire request — no redundant connections.
   const db = createAdminClient();
 
+  await writeSystemHeartbeatSafe(db, {
+    component: 'webhook_helius',
+    status: 'active',
+    source: 'helius_webhook',
+    message: 'Webhook batch received',
+    meta: { received: txns.length },
+  });
+
   // ── 2b. Raw archive — fire-and-forget (sovereign immutable log) ─
   // Written before decode so even unparseable payloads are captured.
-  processor.archiveRaw(txns, db).catch(err =>
-    log('warn', 'Raw transaction logging failed', err),
-  );
+  processor.archiveRaw(txns, db).catch(async err => {
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_helius_raw_archive',
+      status: 'error',
+      source: 'helius_webhook',
+      message: err instanceof Error ? err.message : String(err),
+      meta: { received: txns.length },
+    });
+    log('warn', 'Raw transaction logging failed', err);
+  });
 
   // ── 3. Fetch processing context — parallel ─────────────────
   const [whaleAddressSet, solPriceUsd] = await Promise.all([
@@ -101,9 +124,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   log('info', `SOL price: $${solPriceUsd.toFixed(2)}, whale addresses: ${whaleAddressSet.size}`);
 
   // ── 4. Process batch (decode → normalize → persist → alerts) ─
-  const receipt = await processor.processBatch(txns, { solPriceUsd, whaleAddressSet }, db);
+  try {
+    const receipt = await processor.processBatch(txns, { solPriceUsd, whaleAddressSet }, db);
 
-  log('info', `Done — ${receipt.inserted} movements, ${receipt.token_inserted} token_movements`);
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_helius',
+      status: 'ok',
+      source: 'helius_webhook',
+      message: 'Webhook batch processed',
+      meta: {
+        received: receipt.received,
+        classified: receipt.classified,
+        inserted: receipt.inserted,
+        token_inserted: receipt.token_inserted,
+      },
+    });
 
-  return NextResponse.json({ ok: true, ...receipt });
+    log('info', `Done — ${receipt.inserted} movements, ${receipt.token_inserted} token_movements`);
+
+    return NextResponse.json({ ok: true, ...receipt });
+  } catch (err) {
+    await writeSystemHeartbeatSafe(db, {
+      component: 'webhook_helius',
+      status: 'error',
+      source: 'helius_webhook',
+      message: err instanceof Error ? err.message : String(err),
+      meta: { received: txns.length },
+    });
+    throw err;
+  }
 }

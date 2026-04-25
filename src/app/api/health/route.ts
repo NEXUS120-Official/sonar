@@ -32,7 +32,7 @@ export async function GET(): Promise<NextResponse> {
 
   // ── Fetch subsystem state ─────────────────────────────────
   const db2 = db as any;
-  const [movRes, snapRes, whaleRes, alertRes, rawTxRes, predRes] = await Promise.all([
+  const [movRes, snapRes, whaleRes, alertRes, rawTxRes, predRes, hbRes] = await Promise.all([
     // Last movement received via webhook
     db2.from('movements')
       .select('block_time, created_at')
@@ -74,6 +74,19 @@ export async function GET(): Promise<NextResponse> {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle() as Promise<{ data: { created_at: string; evaluated_at: string | null } | null }>,
+
+    // Operational heartbeats
+    db2.from('system_heartbeats')
+      .select('component, status, source, message, updated_at, meta')
+      .order('updated_at', { ascending: false })
+      .limit(20) as Promise<{ data: Array<{
+        component: string;
+        status: string;
+        source: string | null;
+        message: string | null;
+        updated_at: string;
+        meta: Record<string, unknown> | null;
+      }> | null }>,
   ]);
 
   // ── Movement / webhook freshness ──────────────────────────
@@ -108,6 +121,11 @@ export async function GET(): Promise<NextResponse> {
   const alertAgeMs    = lastAlertAt ? now - new Date(lastAlertAt).getTime() : Infinity;
 
   // ── Overall status ─────────────────────────────────────────
+  const heartbeatRows = hbRes.data ?? [];
+  const heartbeatMap = Object.fromEntries(
+    heartbeatRows.map((row) => [row.component, row])
+  );
+
   const statuses = [webhookStatus, snapshotStatus, balanceStatus];
   const overall  =
     statuses.includes('down')     ? 'down' :
@@ -156,6 +174,10 @@ export async function GET(): Promise<NextResponse> {
           status:           predRes.data ? 'active' : 'not_started',
           last_run_at:      predRes.data?.created_at ?? null,
           last_evaluated_at: predRes.data?.evaluated_at ?? null,
+        },
+        observability: {
+          heartbeat_count: heartbeatRows.length,
+          components: heartbeatMap,
         },
       },
     },
