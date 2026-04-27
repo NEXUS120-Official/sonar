@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { ingestAddressHistory } from '@/lib/ingest/ingest-rpc';
+import { SovereignSolanaProvider } from '@/lib/providers/adapters/sovereign';
+import { historyToRawRow } from '@/lib/ingest/ingest-rpc';
 import { writeSystemHeartbeatSafe } from '@/lib/ops/system-heartbeats';
 
 function verifyCronSecret(req: NextRequest): boolean {
@@ -53,19 +54,61 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (whaleErr) throw whaleErr;
 
-    const addresses = ((whales ?? []) as Array<{ address: string }>).map((w) => w.address).filter(Boolean);
+    const addresses = ((whales ?? []) as Array<{ address: string }>)
+      .map((w) => w.address)
+      .filter(Boolean);
 
-    const receipts = [];
+    const provider = new SovereignSolanaProvider();
+    const receipts: Array<{
+      address: string;
+      fetched: number;
+      archived: number;
+      skipped: number;
+      provider: string;
+      errors: string[];
+    }> = [];
+
     for (const address of addresses) {
-      const receipt = await ingestAddressHistory(db as any, address, { limit: txLimit });
-      receipts.push({
-        address,
-        fetched: receipt.fetched,
-        archived: receipt.archived,
-        skipped: receipt.skipped,
-        provider: receipt.provider,
-        errors: receipt.errors,
-      });
+      try {
+        const history = await provider.getAddressHistory(address, { limit: txLimit });
+        const rows = history.filter((h) => h.signature).map(historyToRawRow);
+
+        let archived = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+
+        if (rows.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error } = await (db as any)
+            .from('raw_transactions')
+            .upsert(rows as any, { onConflict: 'signature', ignoreDuplicates: true });
+
+          if (error) {
+            errors.push(error.message);
+            skipped = rows.length;
+          } else {
+            archived = rows.length;
+          }
+        }
+
+        receipts.push({
+          address,
+          fetched: history.length,
+          archived,
+          skipped,
+          provider: 'sovereign_solana',
+          errors,
+        });
+      } catch (err) {
+        receipts.push({
+          address,
+          fetched: 0,
+          archived: 0,
+          skipped: 0,
+          provider: 'sovereign_solana',
+          errors: [err instanceof Error ? err.message : String(err)],
+        });
+      }
     }
 
     const totalFetched = receipts.reduce((n, r) => n + r.fetched, 0);
