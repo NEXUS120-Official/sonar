@@ -32,104 +32,107 @@ export default async function Home() {
     <main className="flex flex-col min-h-screen" style={{ background: '#0A0A0F', color: '#F0F0F8' }}>
 
       {/* Nav */}
-      <nav className="flex items-center justify-between px-8 py-5 border-b" style={{ borderColor: '#2A2A3A' }}>
-        <Image src="/sonar-logo.svg" alt="SONAR" width={120} height={32} priority style={{ height: 32, width: 'auto' }} />
-        <div className="flex items-center gap-6">
-          <Link href="/dashboard" className="text-sm hover:opacity-80 transition-opacity" style={{ color: '#8888AA' }}>
-            Dashboard
-          </Link>
-          <a
-            href="https://t.me/+XE4ANzPt9YFlOGE8"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-semibold px-4 py-2 rounded-lg transition-opacity hover:opacity-80"
-            style={{ background: '#7B61FF', color: '#F0F0F8' }}
-          >
-            Join Telegram
-          </a>
+      <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-4 bg-black/30 backdrop-blur-xl border-b border-white/5 transition-all duration-300">
+        <Image src="/sonar-logo.svg" alt="SONAR" width={100} height={28} priority />
+        <div className="flex items-center gap-8">
+            <Link href="/dashboard" className="text-sm font-medium text-gray-400 hover:text-white transition-colors duration-200">Dashboard</Link>
+            <Link href="/dashboard/whales" className="text-sm font-medium text-gray-400 hover:text-white transition-colors duration-200">Whales</Link>
+            <Link href="/docs" className="text-sm font-medium text-gray-400 hover:text-white transition-colors duration-200">Docs</Link>
+            <a href="https://t.me/+XE4ANzPt9YFlOGE8" target="_blank" rel="noopener noreferrer" className="relative px-5 py-2.5 rounded-lg text-sm font-semibold text-black bg-[#00D4FF] hover:shadow-[0_0_30px_rgba(0,212,255,0.4)] transition-all duration-300">
+                Launch App
+            </a>
         </div>
-      </nav>
+    </nav>
 
       {/* Hero */}
-      <section className="flex flex-col items-center justify-center flex-1 px-6 py-24 text-center gap-8">
-        <div className="flex flex-col items-center gap-3">
-          <span
-            className="text-xs uppercase tracking-widest px-3 py-1 rounded-full border"
-            style={{ color: '#7B61FF', borderColor: '#7B61FF30', background: '#7B61FF10', fontFamily: 'var(--font-mono)' }}
-          >
-            Smart Money Flow Intelligence · Solana
-          </span>
-          <h1
-            className="text-5xl font-bold tracking-tight max-w-2xl leading-tight"
-            style={{ fontFamily: 'var(--font-heading)' }}
-          >
-            Where Smart Money<br />Moves First
-          </h1>
-          <p className="text-lg max-w-xl" style={{ color: '#8888AA' }}>
-            Real-time exchange flows, staking shifts, and whale movements — aggregated into a single market bias signal.
-          </p>
-        </div>
+      <section className="relative flex flex-col items-center justify-center min-h-screen px-6 text-center pt-20">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-black to-black opacity-70"></div>
 
-        {/* Live gauge */}
-        <div
-          className="flex flex-col items-center gap-2 p-8 rounded-2xl border"
-          style={{ background: '#111118', borderColor: '#2A2A3A', minWidth: 280 }}
-        >
-          <p className="text-xs uppercase tracking-widest mb-2" style={{ color: '#8888AA', fontFamily: 'var(--font-mono)' }}>
-            24h Bias Index · Live
-          </p>
-          <FlowGauge score={bias.score} label={bias.label} size={220} />
-          {bias.time && (
-            <p className="text-xs mt-1" style={{ color: '#8888AA', fontFamily: 'var(--font-mono)' }}>
-              Updated {new Date(bias.time).toLocaleTimeString()}
-            </p>
-          )}
-        </div>
+      <div className="max-w-4xl mx-auto space-y-8">
+        <h1 className="text-6xl lg:text-8xl font-bold tracking-tighter leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-gray-500">
+          Where Smart Money <br/> Moves First
+        </h1>
+        <p className="text-xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
+          Real-time exchange flows, staking shifts and whale movements — aggregated into a single, <span className="text-[#00D4FF] font-semibold">living market bias signal</span> for Solana.
+        </p>
+        
+        <div className="flex flex-col items-center gap-8 pt-8">
+          <div className="p-8 rounded-3xl border border-white/10 bg-white/[0.02] backdrop-blur-xl shadow-2xl shadow-black/50">
+            <p className="text-xs uppercase tracking-[0.2em] mb-4 text-gray-500">24h Bias Index · Live</p>
+            <FlowGauge score={bias.score} label={bias.label} size={260} />
+            {bias.time && (
+                <p className="text-xs mt-4 text-gray-600 font-mono">
+                  Updated {new Date(bias.time).toLocaleTimeString()}
+                </p>
+            )}
+          </div>
 
-        <div className="flex items-center gap-4">
-          <Link
-            href="/dashboard"
-            className="px-6 py-3 rounded-lg font-semibold text-sm transition-opacity hover:opacity-80"
-            style={{ background: '#1A1A24', color: '#F0F0F8', border: '1px solid #2A2A3A' }}
-          >
-            Open Dashboard →
-          </Link>
-          <a
-            href="https://t.me/+XE4ANzPt9YFlOGE8"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-6 py-3 rounded-lg font-semibold text-sm transition-opacity hover:opacity-80"
-            style={{ background: '#7B61FF', color: '#F0F0F8' }}
-          >
-            Get Alerts on Telegram
-          </a>
-          <a href="https://checkout.dodopayments.com/buy/pdt_0NdP2vm9fv4FGj9BNOxHF?quantity=1" target="_blank" rel="noopener noreferrer" className="px-6 py-3 rounded-lg font-semibold text-sm transition-opacity hover:opacity-80" style={{ background: "#00D4FF", color: "#0A0A0F" }}>Go Pro — €19/mo</a>
+          <div className="flex items-center gap-6">
+            <Link href="/dashboard" className="px-8 py-4 rounded-xl font-semibold text-sm bg-white text-black hover:bg-gray-200 transition-all duration-300 shadow-lg">
+              Open Dashboard →
+            </Link>
+            <a href="https://t.me/+XE4ANzPt9YFlOGE8" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-xl font-semibold text-sm border border-[#00D4FF]/30 text-[#00D4FF] hover:bg-[#00D4FF]/10 hover:border-[#00D4FF] transition-all duration-300">
+              Get Alerts on Telegram
+            </a>
+          </div>
         </div>
-      </section>
+      </div>
+    </section>
 
       {/* Feature cards */}
-      <section className="px-8 py-16 max-w-5xl mx-auto w-full">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <FeatureCard
-            icon="⇄"
-            title="Exchange Flows"
-            desc="Track net SOL deposits vs. withdrawals across Binance, Coinbase, OKX, Kraken, and Bybit in real time."
-            color="#7B61FF"
-          />
-          <FeatureCard
-            icon="◎"
-            title="Staking Signals"
-            desc="Monitor liquid staking flows through Marinade and Jito — rising stake = conviction. Unstaking = risk-off."
-            color="#00D4FF"
-          />
-          <FeatureCard
-            icon="⬡"
-            title="DeFi Rotation"
-            desc="See when smart money enters or exits Raydium, Orca, Marginfi, and Drift — before the market reacts."
-            color="#00E5A0"
-          />
+      <section className="px-8 py-24 max-w-7xl mx-auto w-full">
+        <div className="mb-12 text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-white">Intelligence Layer</h2>
+            <p className="text-gray-500 mt-2">Real-time signals, processed and exposed with radical transparency.</p>
         </div>
-      </section>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            
+            <div className="group relative p-6 rounded-2xl border border-[#2A2A3A] bg-[#0A0A0F] hover:border-[#00D4FF]/30 transition-all duration-500 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#00D4FF]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                        <span className="text-2xl">⇄</span>
+                        <span className="text-xs uppercase tracking-widest text-gray-400">Exchange Flows</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-6 mb-2">
+                        <span className="text-3xl font-bold text-white">$18.7M</span>
+                        <span className="text-xs text-[#FF4D6A] font-semibold">Net Inflow ▼</span>
+                    </div>
+                    <p className="text-sm text-gray-500">Track net SOL deposits vs. withdrawals across major CEXs in real time.</p>
+                </div>
+            </div>
+
+            <div className="group relative p-6 rounded-2xl border border-[#2A2A3A] bg-[#0A0A0F] hover:border-[#00E5A0]/30 transition-all duration-500">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#00E5A0]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                        <span className="text-2xl">◎</span>
+                        <span className="text-xs uppercase tracking-widest text-gray-400">Staking Signals</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-6 mb-2">
+                        <span className="text-3xl font-bold text-white">+$0.8M</span>
+                        <span className="text-xs text-[#00E5A0] font-semibold">Net Staked ▲</span>
+                    </div>
+                    <p className="text-sm text-gray-500">Monitor Marinade and Jito flows. A sudden rise in unstaking signals de-risking.</p>
+                </div>
+            </div>
+
+            <div className="group relative p-6 rounded-2xl border border-[#2A2A3A] bg-[#0A0A0F] hover:border-[#7B61FF]/30 transition-all duration-500">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#7B61FF]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-4">
+                        <span className="text-2xl">⬡</span>
+                        <span className="text-xs uppercase tracking-widest text-gray-400">DeFi Rotation</span>
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-6 mb-2">
+                        <span className="text-3xl font-bold text-white">Drift ↗</span>
+                        <span className="text-xs text-[#7B61FF] font-semibold">Capital Shift</span>
+                    </div>
+                    <p className="text-sm text-gray-500">See where smart money is moving across Raydium, Orca, Marginfi, and Drift.</p>
+                </div>
+            </div>
+        </div>
+    </section>
 
       {/* Footer */}
       <footer
@@ -143,15 +146,4 @@ export default async function Home() {
   );
 }
 
-function FeatureCard({ icon, title, desc, color }: { icon: string; title: string; desc: string; color: string }) {
-  return (
-    <div
-      className="rounded-xl border p-6 flex flex-col gap-3"
-      style={{ background: '#111118', borderColor: '#2A2A3A' }}
-    >
-      <span className="text-2xl" style={{ color }}>{icon}</span>
-      <h3 className="font-semibold text-base" style={{ fontFamily: 'var(--font-heading)' }}>{title}</h3>
-      <p className="text-sm leading-relaxed" style={{ color: '#8888AA' }}>{desc}</p>
-    </div>
-  );
-}
+
