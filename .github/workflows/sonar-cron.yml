@@ -36,8 +36,5 @@ jobs:
       - name: Discover whales
         run: npx tsx scripts/discover-whales.ts
 
-      - name: Ricalcolo snapshot
-        run: node recalc-snapshot.js
-
       - name: Summary
         run: echo "✅ SONAR pipeline completata — $(date)"
