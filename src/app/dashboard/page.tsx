@@ -3,7 +3,7 @@
 // ============================================================
 
 import { createAdminClient } from '@/lib/supabase/server';
-import { BiasGauge } from '@/components/BiasGauge';
+import { FlowGauge } from '@/components/FlowGauge';
 import { BiasChart } from '@/components/BiasChart';
 import { WWWDWidget } from '@/components/WWWDWidget';
 import { ProGate } from '@/components/ProGate';
@@ -183,13 +183,7 @@ export default async function DashboardPage() {
           <p className="text-xs uppercase tracking-widest mb-4" style={{ color: '#6b6b80', fontFamily: 'var(--font-mono)' }}>
             SONAR Bias Index™
           </p>
-          <BiasGauge
-            score={biasScore}
-            bias={biasBias}
-            confidence={biasConfidence}
-            components={biasComponents}
-            size={200}
-          />
+          <FlowGauge score={biasScore} label={biasBias} size={200} />
           {!biasLatest && (
             <p className="text-xs text-center mt-4" style={{ color: '#4b4b60', fontFamily: 'var(--font-mono)' }}>
               Populates on next cron run (every 5 min)

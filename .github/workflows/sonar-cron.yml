@@ -1,0 +1,49 @@
+name: SONAR Daily Pipeline
+
+on:
+  schedule:
+    # Ogni giorno alle 6:00 UTC (8:00 CET)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Permette esecuzione manuale
+
+jobs:
+  sonar-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Backfill Alchemy (nuovi movimenti)
+        run: npx tsx scripts/backfill-alchemy-enriched.ts
+
+      - name: Discover Sovereign Whales
+        run: npx tsx scripts/discover-sovereign-whales.ts
+
+      - name: Update Sovereign Balances
+        run: npx tsx scripts/update-sovereign-balances.ts
+
+      - name: Process Flows (ricalcolo snapshot)
+        run: npx tsx scripts/process-flows.ts
+
+      - name: Send Alerts
+        run: npx tsx scripts/send-alerts.ts
+
+      - name: Summary
+        run: echo "✅ SONAR pipeline completata — $(date)"

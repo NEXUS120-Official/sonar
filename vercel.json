@@ -33,72 +33,8 @@
   },
   "crons": [
     {
-      "path": "/api/cron/process-flows",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/send-alerts",
-      "schedule": "*/2 * * * *"
-    },
-    {
-      "path": "/api/cron/update-balances",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cron/discover-whales",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/generate-weekly-report",
-      "schedule": "0 0 * * 1"
-    },
-    {
-      "path": "/api/cron/resolve-outcomes",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/update-whale-stats",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cron/detect-token-signals",
-      "schedule": "*/2 * * * *"
-    },
-    {
-      "path": "/api/cron/backfill-whale-history",
-      "schedule": "0 */12 * * *"
-    },
-    {
-      "path": "/api/cron/build-prediction-features",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cron/evaluate-predictions",
-      "schedule": "30 * * * *"
-    },
-    {
-      "path": "/api/cron/seed-entities",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/update-sovereign-balances",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cron/discover-sovereign-whales",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/backfill-sovereign-history",
-      "schedule": "0 */12 * * *"
-    },
-    {
-      "path": "/api/cron/enrich-sovereign-mints",
-      "schedule": "0 */2 * * *"
-    },
-    {
-      "path": "/api/cron/enrich-sovereign-prices",
-      "schedule": "*/5 * * * *"
+      "path": "/api/cron/daily",
+      "schedule": "0 8 * * *"
     }
   ]
 }

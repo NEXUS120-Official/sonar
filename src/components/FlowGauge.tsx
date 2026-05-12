@@ -1,121 +1,104 @@
-// ============================================================
-// FlowGauge — SVG bias gauge (-100 bearish → +100 bullish)
-// ============================================================
+'use client';
 
 interface FlowGaugeProps {
-  score:  number | null;  // -100 to +100
-  label:  string | null;  // 'bullish' | 'bearish' | 'neutral'
-  size?:  number;
+  score: number | null;
+  label: string | null;
+  size?: number;
 }
 
 export function FlowGauge({ score, label, size = 220 }: FlowGaugeProps) {
-  const cx    = size / 2;
-  const cy    = size / 2 + 10; // slightly lower for semicircle
-  const r     = size * 0.38;
-  const strokeW = size * 0.072;
-
-  // Arc from 180° to 0° (left to right across bottom)
-  const startAngle = Math.PI;    // left
-  const endAngle   = 0;          // right
-  const totalArc   = Math.PI;    // 180°
-
-  // Clamp and normalize score
-  const s         = Math.max(-100, Math.min(100, score ?? 0));
-  const ratio     = (s + 100) / 200; // 0 = fully bearish, 1 = fully bullish
-  const fillAngle = startAngle - ratio * totalArc; // from left toward right
-
-  function polar(angle: number, radius: number) {
-    return {
-      x: cx + radius * Math.cos(angle),
-      y: cy + radius * Math.sin(angle),
-    };
-  }
-
-  function arcPath(from: number, to: number, rad: number) {
-    const s = polar(from, rad);
-    const e = polar(to, rad);
-    const large = Math.abs(from - to) > Math.PI ? 1 : 0;
-    const sweep = to < from ? 0 : 1;
-    return `M ${s.x} ${s.y} A ${rad} ${rad} 0 ${large} ${sweep} ${e.x} ${e.y}`;
-  }
-
-  // Needle tip
-  const needleAngle = startAngle - ratio * totalArc;
-  const needleTip   = polar(needleAngle, r * 0.82);
-  const needleBase1 = polar(needleAngle + Math.PI / 2, strokeW * 0.25);
-  const needleBase2 = polar(needleAngle - Math.PI / 2, strokeW * 0.25);
-
-  const biasColor = label === 'bullish' ? '#00e599'
-                  : label === 'bearish' ? '#ff4757'
-                  : '#ffd60a';
-
-  const displayScore = score === null ? '—' : (s > 0 ? `+${s}` : `${s}`);
+  const percentage = score != null ? ((score + 100) / 200) * 100 : 50;
+  const isBullish = score != null && score > 20;
+  const isBearish = score != null && score < -20;
+  const accentColor = isBullish ? '#00E5A0' : isBearish ? '#FF4D6A' : '#7B61FF';
+  const bars = 42;
 
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div
+      className="relative flex flex-col items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      {/* Effetto Glow posteriore */}
+      <div
+        className="absolute inset-0 rounded-full opacity-15 blur-3xl"
+        style={{ background: accentColor }}
+      />
+
+      {/* Barre Equalizer monocromatiche */}
+      <div className="absolute inset-0 flex items-end justify-center gap-[3px] opacity-25">
+        {Array.from({ length: bars }).map((_, i) => {
+          const distance = Math.abs(i - bars / 2);
+          const maxDistance = bars / 2;
+          const intensity = 1 - distance / maxDistance;
+          const active = intensity > 0.3 && Math.abs(score || 0) > distance * 3;
+          return (
+            <div
+              key={i}
+              className="w-[3px] rounded-full transition-all duration-1000 ease-out"
+              style={{
+                height: active ? `${20 + intensity * 50}%` : `${8 + intensity * 10}%`,
+                background: accentColor,
+                opacity: active ? 0.8 : 0.3,
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Anello esterno (Semicerchio Radar) */}
       <svg
-        width={size}
-        height={size * 0.62}
-        viewBox={`0 0 ${size} ${size * 0.62}`}
-        role="img"
-        aria-label={`Bias gauge: ${displayScore}`}
+        viewBox="0 0 200 100"
+        className="absolute top-0 left-0 w-full h-full"
+        style={{ transform: 'rotate(180deg)' }}
       >
-        {/* Track */}
+        <defs>
+          <linearGradient id="gaugeGradientNew" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#FF4D6A" />
+            <stop offset="50%" stopColor={accentColor} />
+            <stop offset="100%" stopColor="#00E5A0" />
+          </linearGradient>
+        </defs>
+        {/* Sfondo anello */}
         <path
-          d={arcPath(Math.PI, 0, r)}
+          d="M 20 100 A 80 80 0 0 1 180 100"
           fill="none"
-          stroke="#1e1e2e"
-          strokeWidth={strokeW}
+          stroke="url(#gaugeGradientNew)"
+          strokeWidth="4"
           strokeLinecap="round"
+          opacity="0.2"
         />
-
-        {/* Fill arc */}
-        {score !== null && (
-          <path
-            d={arcPath(Math.PI, needleAngle, r)}
-            fill="none"
-            stroke={biasColor}
-            strokeWidth={strokeW}
-            strokeLinecap="round"
-            opacity={0.85}
-          />
-        )}
-
-        {/* Zone labels */}
-        <text x={cx - r - strokeW * 0.6} y={cy + 4} fill="#ff4757" fontSize={size * 0.06} textAnchor="end" fontFamily="var(--font-mono)">−</text>
-        <text x={cx + r + strokeW * 0.6} y={cy + 4} fill="#00e599" fontSize={size * 0.06} textAnchor="start" fontFamily="var(--font-mono)">+</text>
-
-        {/* Needle */}
-        {score !== null && (
-          <polygon
-            points={`${needleTip.x},${needleTip.y} ${needleBase1.x},${needleBase1.y} ${needleBase2.x},${needleBase2.y}`}
-            fill={biasColor}
-          />
-        )}
-
-        {/* Center dot */}
-        <circle cx={cx} cy={cy} r={strokeW * 0.35} fill="#12121a" stroke="#1e1e2e" strokeWidth={2} />
-
-        {/* Score */}
-        <text
-          x={cx}
-          y={cy - r * 0.3}
-          textAnchor="middle"
-          fill={biasColor}
-          fontSize={size * 0.15}
-          fontWeight="700"
-          fontFamily="var(--font-heading)"
-        >
-          {displayScore}
-        </text>
+        {/* Barra attiva */}
+        <path
+          d="M 20 100 A 80 80 0 0 1 180 100"
+          fill="none"
+          stroke="url(#gaugeGradientNew)"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={`${percentage * 2.5} 250`}
+          style={{ transition: 'stroke-dasharray 1.5s cubic-bezier(0.4, 0, 0.2, 1)' }}
+        />
+        {/* Indicatore luminoso */}
+        <circle
+          cx={20 + (percentage / 100) * 160}
+          cy={20 + Math.sin((percentage / 100) * Math.PI) * 80}
+          r="5"
+          fill="white"
+          stroke={accentColor}
+          strokeWidth="2"
+          style={{ transition: 'all 1.5s cubic-bezier(0.4, 0, 0.2, 1)' }}
+        />
       </svg>
 
-      <div className="flex items-center gap-2">
+      {/* Valore Centrale */}
+      <div className="relative z-10 flex flex-col items-center">
         <span
-          className="text-sm font-semibold uppercase tracking-widest"
-          style={{ color: biasColor, fontFamily: 'var(--font-heading)' }}
+          className="text-5xl font-bold tracking-tighter transition-colors duration-500"
+          style={{ color: accentColor, textShadow: `0 0 25px ${accentColor}60` }}
         >
-          {label ?? 'no data'}
+          {score != null ? score : '--'}
+        </span>
+        <span className="text-xs uppercase tracking-[0.2em] mt-2 text-gray-400 font-semibold">
+          {label || 'NEUTRAL'}
         </span>
       </div>
     </div>
