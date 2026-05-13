@@ -29,7 +29,7 @@ async function generateAlerts() {
   console.log('🔔 Generazione alert dai movimenti esistenti...\n');
 
   // 1. Prendi i movimenti exchange degli ultimi 30 minuti non ancora processati
-  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - 240 * 60 * 1000).toISOString();
   
   const { data: movements } = await supabase
     .from('movements')
