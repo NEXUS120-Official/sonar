@@ -2,7 +2,7 @@ name: SONAR Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 */6 * * *'  # Ogni 6 ore
   workflow_dispatch:
 
 jobs:
@@ -13,6 +13,9 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
 
     steps:
       - name: Checkout repository
@@ -33,7 +36,6 @@ jobs:
           const { createClient } = require('@supabase/supabase-js');
           const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
           const RPC_URL = 'https://solana-mainnet.g.alchemy.com/v2/P1PXzlfVo6e8HeAAr04UV';
-
           async function fetchJson(method, params) {
             const res = await fetch(RPC_URL, {
               method: 'POST',
@@ -42,7 +44,6 @@ jobs:
             });
             return res.json();
           }
-
           async function main() {
             console.log('Backfill via Alchemy RPC...');
             const { data: whales } = await supabase.from('whales').select('address').eq('is_active', true).limit(10);
@@ -72,6 +73,9 @@ jobs:
           }
           main().catch(e => { console.error(e); process.exit(1); });
           "
+
+      - name: Genera alert dai movimenti
+        run: npx tsx scripts/generate-alerts.ts
 
       - name: Summary
         run: echo "✅ SONAR pipeline completata — $(date)"
