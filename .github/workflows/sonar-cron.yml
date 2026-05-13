@@ -2,7 +2,7 @@ name: SONAR Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Ogni 6 ore
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -74,8 +74,8 @@ jobs:
           main().catch(e => { console.error(e); process.exit(1); });
           "
 
-      - name: Genera alert dai movimenti
-        run: npx tsx scripts/generate-alerts.ts
+      - name: Genera segnali multi-soglia
+        run: npx tsx scripts/generate-multi-signals.ts
 
       - name: Summary
         run: echo "✅ SONAR pipeline completata — $(date)"
