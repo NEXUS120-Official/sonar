@@ -45,6 +45,9 @@ jobs:
 
       - name: Detect shadow links (CEX-to-Shadow)
         run: npx tsx scripts/detect-shadow-links.ts
+
+      - name: Detect shadow links (CEX-to-Shadow)
+        run: npx tsx scripts/detect-shadow-links.ts
         run: npx tsx scripts/generate-multi-signals.ts
 
       - name: Send alerts (Telegram)
