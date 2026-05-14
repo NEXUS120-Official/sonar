@@ -44,9 +44,15 @@ jobs:
       - name: Generate multi-threshold signals
 
       - name: Detect shadow links (CEX-to-Shadow)
+
+      - name: Detect shadow continuity (Fog-Piercing)
+        run: npx tsx scripts/detect-shadow-continuity.ts
         run: npx tsx scripts/detect-shadow-links.ts
 
       - name: Detect shadow links (CEX-to-Shadow)
+
+      - name: Detect shadow continuity (Fog-Piercing)
+        run: npx tsx scripts/detect-shadow-continuity.ts
         run: npx tsx scripts/detect-shadow-links.ts
         run: npx tsx scripts/generate-multi-signals.ts
 
