@@ -1,10 +1,3 @@
-// ============================================================
-// SONAR — Multi-Threshold Signal Generator
-// Genera segnali a 3 soglie ($25K, $100K, $500K)
-// + Pair Trade SOL-BTC
-// Da eseguire ogni 30 minuti
-// ============================================================
-
 import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
@@ -15,6 +8,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 interface AlertData {
   inflow_usd: number;
@@ -27,9 +22,8 @@ interface AlertData {
 async function generateMultiSignals() {
   console.log('🔔 Generazione segnali multi-soglia...\n');
 
-  // 1. Prendi i movimenti exchange degli ultimi 30 minuti
   const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  
+
   const { data: movements } = await supabase
     .from('movements')
     .select('*')
@@ -44,7 +38,6 @@ async function generateMultiSignals() {
 
   console.log(`  Movimenti trovati: ${movements.length}`);
 
-  // 2. Aggrega per finestra di 5 minuti
   const windows: Record<string, { inflow: number; outflow: number }> = {};
 
   for (const m of movements) {
@@ -66,7 +59,6 @@ async function generateMultiSignals() {
 
   console.log(`  Finestre di 5 minuti: ${Object.keys(windows).length}`);
 
-  // 3. Per ogni finestra, genera segnali a 3 soglie
   const thresholds = [
     { tier: 'weak' as const, amount: 25000 },
     { tier: 'medium' as const, amount: 100000 },
@@ -77,10 +69,12 @@ async function generateMultiSignals() {
 
   for (const [windowKey, data] of Object.entries(windows)) {
     const net = data.outflow - data.inflow;
-    
+
     for (const threshold of thresholds) {
-      // Distribution wave: net positivo > soglia
-      if (net > threshold.amount) {
+      if (Math.abs(net) > threshold.amount) {
+        const direction = net > 0 ? 'distribution' : 'accumulation';
+        const alertType = `${direction}_${threshold.tier}`;
+        
         const alertData: AlertData = {
           inflow_usd: data.inflow,
           outflow_usd: data.outflow,
@@ -89,76 +83,78 @@ async function generateMultiSignals() {
           threshold_used: threshold.amount,
         };
 
-        const title = `Distribution ${threshold.tier} — $${(net / 1e6).toFixed(2)}M net exchange inflow`;
-        const body = `Smart money deposited $${(data.inflow / 1e6).toFixed(2)}M to exchanges vs withdrew $${(data.outflow / 1e6).toFixed(2)}M — net inflow of $${(net / 1e6).toFixed(2)}M. Tier: ${threshold.tier}.`;
+        const title = net > 0 
+          ? `Distribution ${threshold.tier} — $${(net / 1e6).toFixed(2)}M net exchange inflow`
+          : `Accumulation ${threshold.tier} — $${(Math.abs(net) / 1e6).toFixed(2)}M net exchange outflow`;
+        
+        const body = `Smart money ${net > 0 ? 'deposited' : 'withdrew'} $${(Math.abs(net) / 1e6).toFixed(2)}M. Tier: ${threshold.tier}.`;
 
-        // Controlla se esiste già un alert simile
+        // Deduplica
         const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const { count: existingCount } = await supabase
           .from('alerts')
           .select('*', { count: 'exact', head: true })
-          .eq('alert_type', `distribution_${threshold.tier}`)
+          .eq('alert_type', alertType)
           .gte('created_at', fiveMinAgo);
 
-        if (!existingCount || existingCount === 0) {
-          const { error } = await supabase.from('alerts').insert({
-            alert_type: `distribution_${threshold.tier}`,
+        if (existingCount && existingCount > 0) continue;
+
+        // 1. Crea l'alert
+        const { error: alertErr, data: insertedAlert } = await supabase
+          .from('alerts')
+          .insert({
+            alert_type: alertType,
             severity: threshold.tier === 'strong' ? 'major' : threshold.tier === 'medium' ? 'significant' : 'notable',
             title,
             body,
             data: alertData,
             sent_telegram_free: true,
             created_at: new Date().toISOString(),
-          });
+          })
+          .select('id, alert_type')
+          .single();
 
-          if (!error) {
-            console.log(`  ✅ ${threshold.tier}: ${title}`);
-            alertsCreated++;
-          }
+        if (alertErr) {
+          console.log(`  ❌ Errore creazione alert: ${alertErr.message}`);
+          continue;
         }
-      }
 
-      // Accumulation wave: net negativo < -soglia
-      if (net < -threshold.amount) {
-        const alertData: AlertData = {
-          inflow_usd: data.inflow,
-          outflow_usd: data.outflow,
-          net_flow_usd: net,
-          signal_tier: threshold.tier,
-          threshold_used: threshold.amount,
-        };
-
-        const title = `Accumulation ${threshold.tier} — $${(Math.abs(net) / 1e6).toFixed(2)}M net exchange outflow`;
-        const body = `Smart money withdrew $${(data.outflow / 1e6).toFixed(2)}M from exchanges vs deposited $${(data.inflow / 1e6).toFixed(2)}M — net outflow of $${(Math.abs(net) / 1e6).toFixed(2)}M. Tier: ${threshold.tier}.`;
-
-        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const { count: existingCount } = await supabase
-          .from('alerts')
-          .select('*', { count: 'exact', head: true })
-          .eq('alert_type', `accumulation_${threshold.tier}`)
-          .gte('created_at', fiveMinAgo);
-
-        if (!existingCount || existingCount === 0) {
-          const { error } = await supabase.from('alerts').insert({
-            alert_type: `accumulation_${threshold.tier}`,
-            severity: threshold.tier === 'strong' ? 'major' : threshold.tier === 'medium' ? 'significant' : 'notable',
-            title,
-            body,
-            data: alertData,
-            sent_telegram_free: true,
-            created_at: new Date().toISOString(),
+        // 2. Chiama l'API dei segnali per ottenere la raccomandazione
+        try {
+          const signalRes = await fetch(`${BASE_URL}/api/signals`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ alert_type: alertType, capital: 10000 }),
           });
+          
+          if (signalRes.ok) {
+            const { signal: tradeSignal } = await signalRes.json();
+            
+            // 3. Salva il trade signal nel database (nella stessa tabella alerts o in una nuova)
+            const { error: signalErr } = await supabase
+              .from('alerts')
+              .update({
+                data: {
+                  ...alertData,
+                  trade_signal: tradeSignal,
+                },
+              })
+              .eq('id', insertedAlert.id);
 
-          if (!error) {
-            console.log(`  ✅ ${threshold.tier}: ${title}`);
-            alertsCreated++;
+            if (!signalErr) {
+              console.log(`  ✅ ${threshold.tier}: ${title}`);
+              console.log(`     → TRADE SIGNAL: ${tradeSignal.direction} ${tradeSignal.horizon_label} | WR: ${tradeSignal.win_rate} | Size: €${tradeSignal.position_size_eur}`);
+              alertsCreated++;
+            }
           }
+        } catch (e) {
+          console.log(`  ⚠️ Errore chiamata signal API: ${e}`);
         }
       }
     }
   }
 
-  console.log(`\n✅ Totale alert creati: ${alertsCreated}`);
+  console.log(`\n✅ Totale alert con trade signal: ${alertsCreated}`);
 }
 
 generateMultiSignals().catch(console.error);
