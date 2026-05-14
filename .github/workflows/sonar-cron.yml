@@ -1,21 +1,20 @@
-name: SONAR Daily Pipeline
+name: SONAR Hourly Pipeline (Free Mode)
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'   # ogni ora
+  workflow_dispatch:       # permette esecuzione manuale
 
 jobs:
   sonar-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10    # deve finire in fretta per stare nei limiti free
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
-      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -30,52 +29,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Backfill movimenti via Alchemy RPC
-        run: |
-          node -e "
-          const { createClient } = require('@supabase/supabase-js');
-          const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-          const RPC_URL = 'https://solana-mainnet.g.alchemy.com/v2/P1PXzlfVo6e8HeAAr04UV';
-          async function fetchJson(method, params) {
-            const res = await fetch(RPC_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-            });
-            return res.json();
-          }
-          async function main() {
-            console.log('Backfill via Alchemy RPC...');
-            const { data: whales } = await supabase.from('whales').select('address').eq('is_active', true).limit(10);
-            if (!whales || whales.length === 0) { console.log('Nessuna whale trovata'); return; }
-            console.log(whales.length + ' whale da controllare');
-            let inserted = 0;
-            for (const whale of whales) {
-              try {
-                const sigs = await fetchJson('getSignaturesForAddress', [whale.address, { limit: 10 }]);
-                if (!sigs.result || sigs.result.length === 0) continue;
-                for (const sig of sigs.result) {
-                  if (sig.err) continue;
-                  const { count } = await supabase.from('movements').select('*', { count: 'exact', head: true }).eq('signature', sig.signature);
-                  if (count && count > 0) continue;
-                  const blockTime = sig.blockTime ? new Date(sig.blockTime * 1000).toISOString() : new Date().toISOString();
-                  const { error } = await supabase.from('movements').insert({
-                    signature: sig.signature, from_address: whale.address, to_address: 'unknown',
-                    token: 'SOL', amount_token: 0, amount_usd: 0,
-                    flow_type: 'unknown', flow_direction: 'internal', block_time: blockTime
-                  });
-                  if (!error) inserted++;
-                }
-                await new Promise(r => setTimeout(r, 200));
-              } catch(e) { console.log('Errore: ' + e.message); }
-            }
-            console.log(inserted + ' nuovi movimenti inseriti');
-          }
-          main().catch(e => { console.error(e); process.exit(1); });
-          "
+      - name: Backfill recent transactions from active whales
+        run: npx tsx scripts/backfill-recent-whale-txs.ts
 
-      - name: Genera segnali multi-soglia
+      - name: Replay raw transactions into movements
+        run: npx tsx scripts/sovereign-replay-massive.ts
+
+      - name: Classify movements
+        run: node classify-from-db.js
+
+      - name: Update flow snapshot
+        run: node recalc-all2.js
+
+      - name: Generate multi-threshold signals
         run: npx tsx scripts/generate-multi-signals.ts
+
+      - name: Send alerts (Telegram)
+        run: npx tsx scripts/send-alerts.ts
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Summary
         run: echo "✅ SONAR pipeline completata — $(date)"
