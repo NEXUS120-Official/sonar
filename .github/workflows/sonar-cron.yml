@@ -48,6 +48,9 @@ jobs:
       - name: Detect shadow continuity (Fog-Piercing)
 
       - name: Detect privacy lifecycle sequences
+
+      - name: Generate intelligence-grade alerts
+        run: npx tsx scripts/generate-intelligence-alerts.ts
         run: npx tsx scripts/detect-privacy-sequences.ts
         run: npx tsx scripts/detect-shadow-continuity.ts
         run: npx tsx scripts/detect-shadow-links.ts
@@ -57,6 +60,9 @@ jobs:
       - name: Detect shadow continuity (Fog-Piercing)
 
       - name: Detect privacy lifecycle sequences
+
+      - name: Generate intelligence-grade alerts
+        run: npx tsx scripts/generate-intelligence-alerts.ts
         run: npx tsx scripts/detect-privacy-sequences.ts
         run: npx tsx scripts/detect-shadow-continuity.ts
         run: npx tsx scripts/detect-shadow-links.ts
