@@ -50,6 +50,9 @@ jobs:
       - name: Detect privacy lifecycle sequences
 
       - name: Generate intelligence-grade alerts
+
+      - name: Backtest predittivo Shadow Links (solo se ci sono dati)
+        run: npx tsx scripts/backtest-shadow-predictions.ts
         run: npx tsx scripts/generate-intelligence-alerts.ts
         run: npx tsx scripts/detect-privacy-sequences.ts
         run: npx tsx scripts/detect-shadow-continuity.ts
@@ -62,6 +65,9 @@ jobs:
       - name: Detect privacy lifecycle sequences
 
       - name: Generate intelligence-grade alerts
+
+      - name: Backtest predittivo Shadow Links (solo se ci sono dati)
+        run: npx tsx scripts/backtest-shadow-predictions.ts
         run: npx tsx scripts/generate-intelligence-alerts.ts
         run: npx tsx scripts/detect-privacy-sequences.ts
         run: npx tsx scripts/detect-shadow-continuity.ts
