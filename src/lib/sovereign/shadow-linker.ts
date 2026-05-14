@@ -233,9 +233,9 @@ function scoreShadowLink(
 
   // ── Confidence tier ────────────────────────────────────────
   const tier: ConfidenceTier =
-    score >= 75 ? 'direct_proof'     :
+    score >= 70 ? 'direct_proof'     :
     score >= 55 ? 'strong_evidence'  :
-    score >= 35 ? 'moderate_evidence':
+    score >= 30 ? 'moderate_evidence':
     score >= 15 ? 'weak_association' : 'unknown';
 
   // ── Evidence type ──────────────────────────────────────────
